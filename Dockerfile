@@ -19,9 +19,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # ── Ubuntu apt → Aliyun mirror ─────────────────────────────────────────────────
 # Replaces only sources.list (Ubuntu packages); CUDA apt sources in
 # sources.list.d/ are left untouched.
-RUN sed -i \
-    -e 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \
-    -e 's|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \
+# Use -E and https? to handle both http:// and https:// variants.
+RUN sed -i -E \
+    -e 's|https?://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \
+    -e 's|https?://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \
     /etc/apt/sources.list
 
 # ── System dependencies ────────────────────────────────────────────────────────
@@ -38,14 +39,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     ninja-build \
+    # OpenCV runtime deps
     libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender1 \
+    # glfw (graphdecoviewer) runtime — libglfw3.so is loaded via ctypes at import
+    libx11-6 \
+    libxrandr2 \
+    libxinerama1 \
+    libxcursor1 \
+    libxi6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Make python3.12 the default
+# Make python3.12 the default; do NOT set pip alternative here —
+# ensurepip bootstraps pip3.12 into /usr/local/bin which takes PATH priority.
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
     && python -m ensurepip --upgrade \
