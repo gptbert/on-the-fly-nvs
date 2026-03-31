@@ -1,0 +1,45 @@
+services:
+  on-the-fly-nvs:
+    build: .
+    image: on-the-fly-nvs:latest
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+      # iPhone stream URL from IP Camera Lite app
+      # Example: http://192.168.1.100:8080/video
+      - STREAM_URL=${STREAM_URL:-}
+      # Optional: override model save path
+      - MODEL_PATH=${MODEL_PATH:-/app/results}
+    ports:
+      # WebSocket server (browser viewer connects here)
+      - "6009:6009"
+      # HTTP server (open http://localhost:8000/webviewer in browser)
+      - "8000:8000"
+    volumes:
+      # Persist downloaded models (Depth-Anything-V2, XFeat)
+      - model_cache:/cache
+      # Persist reconstruction results
+      - ./results:/app/results
+      # Optional: mount local image dataset for offline use
+      # - ./data:/app/data
+    # Override CMD for different use cases (see examples below)
+    # command: >
+    #   python train.py
+    #     -s http://192.168.1.100:8080/video
+    #     --downsampling 1.5
+    #     --viewer_mode web
+    #     -m /app/results/scene_01
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+volumes:
+  model_cache:
