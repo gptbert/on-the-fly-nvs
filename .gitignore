@@ -6,4 +6,4 @@ models
 Gaussian_Viewer.ini
 .vscode
 data/
-results*
+results*.env
