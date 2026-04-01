@@ -1,16 +1,12 @@
 services:
 
-  # ── Tailscale sidecar ────────────────────────────────────────────────────────
-  # Provides a Tailscale IP that iPhone can reach over any network.
-  # Set TS_AUTHKEY in .env or environment before starting.
-  # Get an auth key at: https://login.tailscale.com/admin/settings/keys
+  # Tailscale sidecar
   tailscale:
     image: tailscale/tailscale:latest
     hostname: ${TS_HOSTNAME:-on-the-fly-nvs}
     environment:
       - TS_AUTHKEY=${TS_AUTHKEY:?TS_AUTHKEY is required. Get one at https://login.tailscale.com/admin/settings/keys}
       - TS_STATE_DIR=/var/lib/tailscale
-      # Advertise this node as a regular peer (no exit node / subnet routing needed)
       - TS_EXTRA_ARGS=--accept-routes
     volumes:
       - tailscale_state:/var/lib/tailscale
@@ -18,36 +14,30 @@ services:
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
+    ports:
+      - "0.0.0.0:2222:22"
+      - "0.0.0.0:6009:6009"
+      - "0.0.0.0:8000:8000"
     restart: unless-stopped
 
-  # ── on-the-fly NVS server ────────────────────────────────────────────────────
+  # on-the-fly NVS server
   on-the-fly-nvs:
     build: .
     image: on-the-fly-nvs:latest
     runtime: nvidia
-    # Share Tailscale container's network: ports 6009 and 8000 are reachable
-    # at the Tailscale IP of this machine from the iPhone.
     network_mode: "service:tailscale"
     depends_on:
       - tailscale
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
-      # iPhone stream URL — use Tailscale IP of the phone if on different networks,
-      # or LAN IP if on the same Wi-Fi.
-      # Example (LAN):       http://192.168.1.100:8080/video
-      # Example (Tailscale): http://100.x.x.x:8080/video
       - STREAM_URL=${STREAM_URL:-}
       - MODEL_PATH=${MODEL_PATH:-/app/results}
+      - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
     volumes:
       - model_cache:/cache
       - ./results:/app/results
-    # command: >
-    #   python train.py
-    #     -s ${STREAM_URL}
-    #     --downsampling 1.5
-    #     --viewer_mode web
-    #     -m /app/results/scene_01
+      # - ~/.ssh/authorized_keys:/root/.ssh/authorized_keys:ro
     deploy:
       resources:
         reservations:
