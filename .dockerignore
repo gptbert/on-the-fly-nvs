@@ -1,0 +1,16 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.eggs
+dist
+build
+results/
+data/
+*.ply
+*.pth
+*.pt
+assets/
+.conda/
+*.swp
