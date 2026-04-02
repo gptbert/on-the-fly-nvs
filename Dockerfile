@@ -12,7 +12,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HF_HOME=/cache/huggingface \
     TORCH_HOME=/cache/torch \
     PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
-    PIP_TRUSTED_HOST=mirrors.aliyun.com
+    PIP_TRUSTED_HOST=mirrors.aliyun.com \
+    # CuPy NVRTC JIT-compiles kernels at runtime; CUDA 12.8's CCCL headers
+    # require C++17 but NVRTC defaults to C++14, causing a catastrophic error.
+    # This flag downgrades the #error to a #warning so compilation proceeds.
+    CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
 
 RUN sed -i -E \
     -e 's|https?://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \

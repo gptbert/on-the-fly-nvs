@@ -34,6 +34,7 @@ services:
       - STREAM_URL=${STREAM_URL:-}
       - MODEL_PATH=${MODEL_PATH:-/app/results}
       - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
+      - CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
     volumes:
       - model_cache:/cache
       - ./results:/app/results
