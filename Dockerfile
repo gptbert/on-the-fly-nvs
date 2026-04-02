@@ -3,7 +3,7 @@
 # Build: docker build -t on-the-fly-nvs .
 # Submodules are auto-cloned at build time if not locally initialized.
 
-FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -58,7 +58,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir \
     torch torchvision xformers \
-    --index-url https://download.pytorch.org/whl/cu128
+    --index-url https://download.pytorch.org/whl/cu121
 
 RUN pip install --no-cache-dir cupy-cuda12x
 
