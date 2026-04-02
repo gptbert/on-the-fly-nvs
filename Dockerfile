@@ -3,7 +3,7 @@
 # Build: docker build -t on-the-fly-nvs .
 # Submodules are auto-cloned at build time if not locally initialized.
 
-FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -13,9 +13,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TORCH_HOME=/cache/torch \
     PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
     PIP_TRUSTED_HOST=mirrors.aliyun.com \
-    # CuPy NVRTC JIT-compiles kernels at runtime; CUDA 12.8's CCCL headers
-    # require C++17 but NVRTC defaults to C++14, causing a catastrophic error.
-    # This flag downgrades the #error to a #warning so compilation proceeds.
     CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
 
 RUN sed -i -E \
@@ -58,7 +55,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir \
     torch torchvision xformers \
-    --index-url https://download.pytorch.org/whl/cu121
+    --index-url https://download.pytorch.org/whl/cu128
 
 RUN pip install --no-cache-dir cupy-cuda12x
 
