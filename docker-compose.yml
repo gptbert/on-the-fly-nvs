@@ -37,6 +37,7 @@ services:
       - CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
     volumes:
       - model_cache:/cache
+      - cupy_cache:/root/.cupy
       - ./results:/app/results
       # - ~/.ssh/authorized_keys:/root/.ssh/authorized_keys:ro
     deploy:
@@ -52,4 +53,5 @@ services:
 
 volumes:
   model_cache:
+  cupy_cache:
   tailscale_state:
