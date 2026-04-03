@@ -35,11 +35,12 @@ services:
       - MODEL_PATH=${MODEL_PATH:-/app/results}
       - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
       - CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
+      # FFmpeg auto-reconnect for MJPEG HTTP stream (IP Camera Lite uses HTTP/1.0)
+      - OPENCV_FFMPEG_CAPTURE_OPTIONS=reconnect;1|reconnect_streamed;1|reconnect_delay_max;2|timeout;60000000
     volumes:
       - model_cache:/cache
       - cupy_cache:/root/.cupy
       - ./results:/app/results
-      # - ~/.ssh/authorized_keys:/root/.ssh/authorized_keys:ro
     deploy:
       resources:
         reservations:
