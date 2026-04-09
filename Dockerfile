@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # On-the-fly NVS - Docker Image
 # Requires NVIDIA GPU with CUDA 12.x driver support (nvidia-smi should show CUDA 12.x)
 # Build: docker build -t on-the-fly-nvs .
@@ -20,7 +21,9 @@ RUN sed -i -E \
     -e 's|https?://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \
     /etc/apt/sources.list
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     ca-certificates \
     && add-apt-repository ppa:deadsnakes/ppa \
@@ -43,23 +46,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libxinerama1 \
     libxcursor1 \
-    libxi6 \
-    && rm -rf /var/lib/apt/lists/*
+    libxi6
 
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
     && python -m ensurepip --upgrade \
     && python -m pip install --upgrade pip setuptools wheel
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
     torch torchvision xformers \
     --index-url https://download.pytorch.org/whl/cu128
 
-RUN pip install --no-cache-dir cupy-cuda12x
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install cupy-cuda12x
 
-RUN pip install --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
     plyfile \
     tqdm \
     opencv-python \
@@ -84,12 +90,16 @@ RUN git config --global --add safe.directory /app && \
 
 ENV MAX_JOBS=4 \
     TORCH_CUDA_ARCH_LIST="8.6"
-RUN pip install --no-cache-dir --no-build-isolation submodules/diff-gaussian-rasterization
-RUN pip install --no-cache-dir --no-build-isolation submodules/fused-ssim
-RUN pip install --no-cache-dir --no-build-isolation submodules/simple-knn
-RUN pip install --no-cache-dir submodules/graphdecoviewer
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-build-isolation submodules/diff-gaussian-rasterization
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-build-isolation submodules/fused-ssim
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-build-isolation submodules/simple-knn
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install submodules/graphdecoviewer
 
-RUN mkdir -p /cache/huggingface /cache/torch /app/results /app/data
+RUN mkdir -p /cache/huggingface /cache/torch /app/results /app/data /cache/models
 
 RUN mkdir -p /run/sshd /root/.ssh && \
     chmod 700 /root/.ssh && \
@@ -104,12 +114,14 @@ RUN chmod +x /entrypoint.sh
 
 EXPOSE 22 6009 8000
 
-ENV STREAM_URL=""
+ENV STREAM_URL="" \
+    DEPTH_MODEL="vitb" \
+    DOWNSAMPLING="1.5"
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["sh", "-c", \
     "python train.py \
         -s ${STREAM_URL} \
-        --downsampling 1.5 \
+        --downsampling ${DOWNSAMPLING} \
         --viewer_mode web \
         -m /app/results/$(date +%Y%m%d_%H%M%S)"]

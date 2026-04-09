@@ -23,13 +23,13 @@ os.environ["XFORMERS_FORCE_DISABLE_TRITON"] = "1"
 from depth_anything_v2.dpt import DepthAnythingV2
 
 size = 518
-encoder = "vitl"
+encoder = os.environ.get("DEPTH_MODEL", "vitb")
 
 
 class MonoDepthInternal(torch.nn.Module):
     def __init__(self):
         super(MonoDepthInternal, self).__init__()
-        model_path = f"models/depth_anything_v2_{encoder}.pth"
+        model_path = os.environ.get("DEPTH_MODEL_PATH", f"/cache/models/depth_anything_v2_{encoder}.pth")
         if not os.path.exists(model_path):
             print(f"Downloading Depth-Anything-V2 model for {encoder}, may take a few minutes...")
             model_sizes = {

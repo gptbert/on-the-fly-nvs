@@ -29,12 +29,17 @@ services:
     depends_on:
       - tailscale
     environment:
+      - CUDA_VISIBLE_DEVICES=1
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
       - STREAM_URL=${STREAM_URL:-}
       - MODEL_PATH=${MODEL_PATH:-/app/results}
       - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
       - CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
+      # Depth model: vits (fastest), vitb (balanced), vitl (best quality)
+      - DEPTH_MODEL=${DEPTH_MODEL:-vitb}
+      # Downsampling factor: higher = smaller image = faster (1.5 default, try 2.0 or 3.0)
+      - DOWNSAMPLING=${DOWNSAMPLING:-1.5}
       # HuggingFace mirror for faster model download in China
       - HF_ENDPOINT=https://hf-mirror.com
       # FFmpeg auto-reconnect for MJPEG HTTP stream (IP Camera Lite uses HTTP/1.0)
@@ -43,6 +48,7 @@ services:
       - model_cache:/cache
       - cupy_cache:/root/.cupy
       - ./results:/app/results
+      - depth_models:/cache/models
     deploy:
       resources:
         reservations:
@@ -58,3 +64,4 @@ volumes:
   model_cache:
   cupy_cache:
   tailscale_state:
+  depth_models:
