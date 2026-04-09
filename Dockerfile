@@ -104,12 +104,14 @@ RUN chmod +x /entrypoint.sh
 
 EXPOSE 22 6009 8000
 
-ENV STREAM_URL=""
+ENV STREAM_URL="" \
+    DEPTH_MODEL="vitb" \
+    DOWNSAMPLING="1.5"
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["sh", "-c", \
     "python train.py \
         -s ${STREAM_URL} \
-        --downsampling 1.5 \
+        --downsampling ${DOWNSAMPLING} \
         --viewer_mode web \
         -m /app/results/$(date +%Y%m%d_%H%M%S)"]
