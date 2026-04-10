@@ -129,10 +129,15 @@ def get_args():
 
     ## Viewer
     parser.add_argument('--viewer_mode', choices=['local', 'server', 'web', 'none'], default='none')
-    parser.add_argument('--ip', type=str, default="0.0.0.0", 
+    parser.add_argument('--ip', type=str, default="0.0.0.0",
                         help="IP address of the viewer client, if using server viewer_mode")
     parser.add_argument('--port', type=int, default=6009,
                         help="Port of the viewer client, if using server viewer_mode")
+
+    ## ARKit streaming
+    parser.add_argument('--arkit_port', type=int, default=0,
+                        help="If > 0, receive frames and ARKit poses via WebSocket on this port "
+                             "instead of estimating poses. Implies --use_colmap_poses.")
 
     args = parser.parse_args()
 

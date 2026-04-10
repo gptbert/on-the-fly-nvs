@@ -20,6 +20,7 @@ from socketserver import TCPServer
 from http.server import SimpleHTTPRequestHandler
 from args import get_args
 from threading import Thread
+from dataloaders.arkit_stream_dataset import ARKitStreamDataset
 from dataloaders.image_dataset import ImageDataset
 from dataloaders.stream_dataset import StreamDataset
 from poses.feature_detector import Detector
@@ -42,8 +43,16 @@ if __name__ == "__main__":
 
     args = get_args()
 
+    # ARKit mode: receive frames + poses from iPhone via WebSocket
+    is_arkit = args.arkit_port > 0
+    if is_arkit:
+        args.use_colmap_poses = True  # always use provided poses in ARKit mode
+
     # Initialize dataloader
-    if "://" in args.source_path:
+    if is_arkit:
+        dataset = ARKitStreamDataset("0.0.0.0", args.arkit_port, args.downsampling)
+        is_stream = True
+    elif "://" in args.source_path:
         dataset = StreamDataset(args.source_path, args.downsampling)
         is_stream = True
     else:
@@ -150,8 +159,15 @@ if __name__ == "__main__":
 
             if n_keyframes == args.num_keyframes_miniba_bootstrap - 1:
                 start_time = time.time()
-                Rts, f, _ = pose_initializer.initialize_bootstrap(bootstrap_desc_kpts)
-                focal = f.cpu().item()
+                if is_arkit:
+                    # ARKit mode: poses are provided; skip bundle adjustment entirely.
+                    # Use the focal length from the first bootstrap frame.
+                    f = bootstrap_keyframe_dicts[0]["info"]["focal"]
+                    focal = f.cpu().item()
+                    Rts = [kd["info"]["Rt"] for kd in bootstrap_keyframe_dicts]
+                else:
+                    Rts, f, _ = pose_initializer.initialize_bootstrap(bootstrap_desc_kpts)
+                    focal = f.cpu().item()
                 increment_runtime(runtimes["BAB"], start_time)
                 for index, (keyframe_dict, desc_kpts, Rt) in enumerate(
                     zip(bootstrap_keyframe_dicts, bootstrap_desc_kpts, Rts)
@@ -230,20 +246,25 @@ if __name__ == "__main__":
             ## Incremental reconstruction
             # Incremental pose initialization
             if n_keyframes >= args.num_keyframes_miniba_bootstrap:
-                start_time = time.time()
-                prev_keyframes = scene_model.get_prev_keyframes(
-                    args.num_prev_keyframes_miniba_incr, True, desc_kpts
-                )
-                increment_runtime(runtimes["tri"], start_time)
-                start_time = time.time()
-                Rt = pose_initializer.initialize_incremental(
-                    prev_keyframes, desc_kpts, n_keyframes, info["is_test"], image
-                )
-                increment_runtime(runtimes["BAI"], start_time)
+                if is_arkit:
+                    # ARKit mode: pose is already in info["Rt"]; skip pose estimation.
+                    Rt = info["Rt"]
+                    f = info["focal"]
+                else:
+                    start_time = time.time()
+                    prev_keyframes = scene_model.get_prev_keyframes(
+                        args.num_prev_keyframes_miniba_incr, True, desc_kpts
+                    )
+                    increment_runtime(runtimes["tri"], start_time)
+                    start_time = time.time()
+                    Rt = pose_initializer.initialize_incremental(
+                        prev_keyframes, desc_kpts, n_keyframes, info["is_test"], image
+                    )
+                    increment_runtime(runtimes["BAI"], start_time)
+                    if Rt is not None and args.use_colmap_poses:
+                        Rt = info["Rt"]
                 start_time = time.time()
                 if Rt is not None:
-                    if args.use_colmap_poses:
-                        Rt = info["Rt"]
                     keyframe = Keyframe(
                         image,
                         info,

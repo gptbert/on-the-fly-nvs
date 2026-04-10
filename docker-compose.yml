@@ -18,6 +18,7 @@ services:
       - "0.0.0.0:2222:22"
       - "0.0.0.0:6009:6009"
       - "0.0.0.0:8000:8000"
+      - "0.0.0.0:9000:9000"
     restart: unless-stopped
 
   # on-the-fly NVS server
@@ -40,6 +41,8 @@ services:
       - DEPTH_MODEL=${DEPTH_MODEL:-vitb}
       # Downsampling factor: higher = smaller image = faster (1.5 default, try 2.0 or 3.0)
       - DOWNSAMPLING=${DOWNSAMPLING:-1.5}
+      # ARKit WebSocket port: set > 0 to enable ARKit pose input from iPhone (disables STREAM_URL)
+      - ARKIT_PORT=${ARKIT_PORT:-0}
       # HuggingFace mirror for faster model download in China
       - HF_ENDPOINT=https://hf-mirror.com
       # FFmpeg auto-reconnect for MJPEG HTTP stream (IP Camera Lite uses HTTP/1.0)

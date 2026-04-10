@@ -112,16 +112,25 @@ RUN mkdir -p /run/sshd /root/.ssh && \
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 22 6009 8000
+EXPOSE 22 6009 8000 9000
 
 ENV STREAM_URL="" \
     DEPTH_MODEL="vitb" \
-    DOWNSAMPLING="1.5"
+    DOWNSAMPLING="1.5" \
+    ARKIT_PORT="0"
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["sh", "-c", \
-    "python train.py \
-        -s ${STREAM_URL} \
-        --downsampling ${DOWNSAMPLING} \
-        --viewer_mode web \
-        -m /app/results/$(date +%Y%m%d_%H%M%S)"]
+    "if [ \"${ARKIT_PORT}\" -gt 0 ]; then \
+        python train.py \
+            --arkit_port ${ARKIT_PORT} \
+            --downsampling ${DOWNSAMPLING} \
+            --viewer_mode web \
+            -m /app/results/$(date +%Y%m%d_%H%M%S); \
+    else \
+        python train.py \
+            -s ${STREAM_URL} \
+            --downsampling ${DOWNSAMPLING} \
+            --viewer_mode web \
+            -m /app/results/$(date +%Y%m%d_%H%M%S); \
+    fi"]
