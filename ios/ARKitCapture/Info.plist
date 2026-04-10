@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Required: camera access for ARKit -->
+    <key>NSCameraUsageDescription</key>
+    <string>Camera is required to capture frames and ARKit pose data for 3D reconstruction.</string>
+
+    <!-- Required: local network for WebSocket connection to the reconstruction server -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Local network access is needed to stream frames and poses to the reconstruction server.</string>
+
+    <!-- Required: allow plain ws:// (non-HTTPS) connections to local server -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+
+    <!-- ARKit world tracking -->
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arkit</string>
+    </array>
+
+    <!-- Landscape + portrait supported, but ARKit works best in portrait -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+</dict>
+</plist>
