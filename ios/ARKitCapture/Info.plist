@@ -24,9 +24,11 @@
         <string>arkit</string>
     </array>
 
-    <!-- Landscape + portrait supported, but ARKit works best in portrait -->
+    <!-- Default: landscape; portrait available when orientation lock is off -->
     <key>UISupportedInterfaceOrientations</key>
     <array>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
         <string>UIInterfaceOrientationPortrait</string>
     </array>
 </dict>

@@ -40,6 +40,17 @@ final class ARCaptureManager: NSObject {
         let config = ARWorldTrackingConfiguration()
         config.worldAlignment = .gravity          // Y up
         config.frameSemantics = []
+
+        // Prefer 1920×1080 @ highest frame rate; fall back to widest available.
+        let formats = ARWorldTrackingConfiguration.supportedVideoFormats
+        if let fmt = formats.first(where: {
+            $0.imageResolution == CGSize(width: 1920, height: 1080)
+        }) ?? formats.first(where: {
+            $0.imageResolution.width >= 1920
+        }) {
+            config.videoFormat = fmt
+        }
+
         arSession.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
 
