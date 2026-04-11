@@ -38,16 +38,16 @@ final class ARCaptureManager: NSObject {
 
     func startARSession() {
         let config = ARWorldTrackingConfiguration()
-        config.worldAlignment = .gravity          // Y up
+        config.worldAlignment = .gravity
         config.frameSemantics = []
 
-        // Prefer 1920×1080 @ highest frame rate; fall back to widest available.
+        // Prefer a 16:9 format (1920×1080) so the rotated portrait image is
+        // also 16:9 (1080×1920).  Fall back to the widest available format.
         let formats = ARWorldTrackingConfiguration.supportedVideoFormats
-        if let fmt = formats.first(where: {
-            $0.imageResolution == CGSize(width: 1920, height: 1080)
-        }) ?? formats.first(where: {
-            $0.imageResolution.width >= 1920
-        }) {
+        let target = CGSize(width: 1920, height: 1080)
+        if let fmt = formats.first(where: { $0.imageResolution == target })
+                  ?? formats.first(where: { abs($0.imageResolution.width / $0.imageResolution.height - 16.0/9) < 0.01 })
+                  ?? formats.first(where: { $0.imageResolution.width >= 1920 }) {
             config.videoFormat = fmt
         }
 

@@ -1,9 +1,9 @@
 import SwiftUI
 import ARKit
-import SceneKit
 
-/// Bridges ARSCNView (UIKit) into SwiftUI.
-/// Shows the live camera feed; no 3-D content is added.
+/// Bridges ARSCNView into SwiftUI, showing only the live camera feed.
+/// The view is locked to portrait; ARSCNView renders the camera texture
+/// and applies the correct orientation transform automatically.
 struct ARViewContainer: UIViewRepresentable {
     let manager: ARCaptureManager
 
@@ -11,9 +11,7 @@ struct ARViewContainer: UIViewRepresentable {
         let view = ARSCNView(frame: .zero)
         view.session = manager.arSession
         view.automaticallyUpdatesLighting = false
-        view.scene = SCNScene()
-        // Prevent the scene-kit render loop from fighting with our delegate
-        view.rendersContinuously = false
+        view.rendersContinuously = false   // camera feed updates on demand
         return view
     }
 

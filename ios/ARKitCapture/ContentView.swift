@@ -4,7 +4,6 @@ struct ContentView: View {
 
     @State private var manager = ARCaptureManager()
 
-    // Persisted settings
     @AppStorage("serverHost") private var serverHost = ""
     @AppStorage("serverPort") private var serverPort = "9000"
     @AppStorage("downsampling") private var downsampling = "1.5"
@@ -13,22 +12,78 @@ struct ContentView: View {
 
     @State private var showSettings = false
 
-    // Detect landscape vs portrait
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
-
-    private var isLandscape: Bool { verticalSizeClass == .compact }
-
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
+
             // ── Camera preview (full screen) ──────────────────────────────────
             ARViewContainer(manager: manager)
                 .ignoresSafeArea()
 
-            if isLandscape {
-                landscapeLayout
-            } else {
-                portraitLayout
+            // ── Tracking badge (top-right) ────────────────────────────────────
+            VStack {
+                HStack {
+                    Spacer()
+                    Text(manager.trackingState)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.trailing)
+                }
+                Spacer()
             }
+            .padding(.top)
+
+            // ── Bottom control dock ───────────────────────────────────────────
+            VStack(spacing: 12) {
+
+                // Status row
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(manager.isConnected ? Color.green : Color.red)
+                        .frame(width: 8, height: 8)
+                    Text(manager.statusText)
+                        .font(.caption).lineLimit(1)
+                    Spacer()
+                    if manager.isConnected {
+                        Text(String(format: "%.0f fps", manager.sentFPS))
+                            .font(.caption.monospacedDigit())
+                    }
+                }
+                .foregroundStyle(.primary)
+
+                // Server address
+                HStack(spacing: 8) {
+                    TextField("Server IP / hostname", text: $serverHost)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.numbersAndPunctuation)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    TextField("Port", text: $serverPort)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.numberPad)
+                        .frame(width: 68)
+                }
+
+                // Connect + Settings
+                HStack(spacing: 10) {
+                    Button { toggleConnection() } label: {
+                        Label(
+                            manager.isConnected ? "Disconnect" : "Connect",
+                            systemImage: manager.isConnected ? "wifi.slash" : "wifi"
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(manager.isConnected ? .red : .blue)
+
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding()
+            .background(.ultraThinMaterial)
         }
         .onAppear {
             applySettings()
@@ -48,120 +103,10 @@ struct ContentView: View {
         }
     }
 
-    // MARK: – Landscape layout
-    // Controls float on the right edge so the full 16:9 frame is visible.
-    private var landscapeLayout: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 14) {
-                trackingBadge
-
-                Spacer()
-
-                statusRow
-                    .frame(maxWidth: 220)
-
-                serverFields
-                    .frame(maxWidth: 220)
-
-                connectButton
-                    .frame(maxWidth: 220)
-
-                Button { showSettings = true } label: {
-                    Label("Settings", systemImage: "gearshape")
-                        .frame(maxWidth: 220)
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding()
-            .frame(width: 240)
-            .background(.ultraThinMaterial)
-        }
-    }
-
-    // MARK: – Portrait layout
-    // Controls dock at the bottom.
-    private var portraitLayout: some View {
-        VStack {
-            HStack {
-                Spacer()
-                trackingBadge
-                    .padding()
-            }
-            Spacer()
-            VStack(spacing: 12) {
-                statusRow
-                serverFields
-                HStack(spacing: 10) {
-                    connectButton
-                    Button { showSettings = true } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .padding()
-            .background(.ultraThinMaterial)
-        }
-    }
-
-    // MARK: – Shared sub-views
-
-    private var trackingBadge: some View {
-        Text(manager.trackingState)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(.ultraThinMaterial, in: Capsule())
-    }
-
-    private var statusRow: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(manager.isConnected ? Color.green : Color.red)
-                .frame(width: 8, height: 8)
-            Text(manager.statusText)
-                .font(.caption).lineLimit(1)
-            Spacer()
-            if manager.isConnected {
-                Text(String(format: "%.0f fps", manager.sentFPS))
-                    .font(.caption.monospacedDigit())
-            }
-        }
-        .foregroundStyle(.primary)
-    }
-
-    private var serverFields: some View {
-        HStack(spacing: 8) {
-            TextField("Server IP / hostname", text: $serverHost)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.numbersAndPunctuation)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            TextField("Port", text: $serverPort)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.numberPad)
-                .frame(width: 68)
-        }
-    }
-
-    private var connectButton: some View {
-        Button { toggleConnection() } label: {
-            Label(
-                manager.isConnected ? "Disconnect" : "Connect",
-                systemImage: manager.isConnected ? "wifi.slash" : "wifi"
-            )
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(manager.isConnected ? .red : .blue)
-    }
-
-    // MARK: – Helpers
-
     private func applySettings() {
-        manager.downsampling = Float(downsampling)      ?? 1.5
+        manager.downsampling = Float(downsampling)         ?? 1.5
         manager.jpegQuality  = CGFloat(Double(jpegQuality) ?? 0.5)
-        manager.maxSendFPS   = Double(maxFPS)           ?? 15
+        manager.maxSendFPS   = Double(maxFPS)              ?? 15
     }
 
     private func toggleConnection() {
@@ -205,11 +150,11 @@ struct SettingsSheet: View {
                     }
                 }
                 Section {
-                    Text("Camera captures at 1920×1080. "
-                       + "Downsample 1.5 → 1280×720; 2.0 → 960×540.\n"
-                       + "Match server DOWNSAMPLING env var.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("Sensor captures 1920×1080 (16:9 landscape) and rotates "
+                       + "to portrait (1080×1920).\n"
+                       + "Downsample 1.5 → 720×1280 · 2.0 → 540×960.\n"
+                       + "Set server DOWNSAMPLING to match.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Settings")

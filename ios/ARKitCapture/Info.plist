@@ -24,11 +24,9 @@
         <string>arkit</string>
     </array>
 
-    <!-- Default: landscape; portrait available when orientation lock is off -->
+    <!-- Portrait only: sensor image is rotated to portrait in FrameEncoder -->
     <key>UISupportedInterfaceOrientations</key>
     <array>
-        <string>UIInterfaceOrientationLandscapeLeft</string>
-        <string>UIInterfaceOrientationLandscapeRight</string>
         <string>UIInterfaceOrientationPortrait</string>
     </array>
 </dict>
