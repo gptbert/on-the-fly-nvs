@@ -49,6 +49,7 @@ from utils import (
     rotation_distance,
 )
 from dataloaders.read_write_model import write_model
+from plyfile import PlyData, PlyElement
 
 
 class SceneModel:
@@ -447,8 +448,6 @@ class SceneModel:
     @torch.no_grad()
     def to_ply_bytes(self) -> bytes:
         """Merge all anchors into one PLY and return as bytes for SuperSplat preview."""
-        from plyfile import PlyData, PlyElement
-
         # Clone tensors under the lock to avoid races with the optimization thread.
         with self.lock:
             gp_copies = [

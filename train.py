@@ -17,7 +17,7 @@ import torch
 from tqdm import tqdm
 
 from socketserver import TCPServer
-from http.server import SimpleHTTPRequestHandler, BaseHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler
 from args import get_args
 from threading import Thread
 from dataloaders.image_dataset import ImageDataset
@@ -35,12 +35,14 @@ from webviewer.webviewer import WebViewer
 from graphdecoviewer.types import ViewerMode
 from utils import align_mean_up_fwd, increment_runtime
 
-def make_web_handler(scene_model):
+def make_web_handler(model):
     """Return an HTTP handler that serves /scene.ply from the live scene model."""
     class Handler(SimpleHTTPRequestHandler):
+        """HTTP request handler: delegates /scene.ply to the live scene model."""
+
         def do_GET(self):
             if self.path == "/scene.ply":
-                ply_bytes = scene_model.to_ply_bytes()
+                ply_bytes = model.to_ply_bytes()
                 if not ply_bytes:
                     self.send_error(503, "Scene not ready yet")
                     return
@@ -53,9 +55,9 @@ def make_web_handler(scene_model):
             else:
                 super().do_GET()
 
-        def log_message(self, format, *args):
+        def log_message(self, fmt, *msg_args):
             if "/scene.ply" in self.path:
-                print(f"[webviewer] PLY snapshot requested – {args[1]}")
+                print(f"[webviewer] PLY snapshot requested – {fmt % msg_args}")
 
     return Handler
 
@@ -114,6 +116,7 @@ if __name__ == "__main__":
     n_active_keyframes = 0
     n_keyframes = 0
     needs_reboot = False
+    last_reboot = 0
     bootstrap_keyframe_dicts = []
     bootstrap_desc_kpts = []
 

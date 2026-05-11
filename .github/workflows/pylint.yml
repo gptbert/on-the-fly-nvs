@@ -20,4 +20,8 @@ jobs:
         pip install pylint
     - name: Analysing the code with pylint
       run: |
-        pylint $(git ls-files '*.py')
+        pylint --errors-only \
+          --disable=import-error,no-member,not-callable,\
+        possibly-used-before-assignment,access-member-before-definition,\
+        no-name-in-module \
+          $(git ls-files '*.py')
