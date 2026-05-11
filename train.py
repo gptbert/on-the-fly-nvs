@@ -274,10 +274,13 @@ if __name__ == "__main__":
                     should_add_keyframe = False
 
         if should_add_keyframe:
-            ## Check if anchor creation is needed based on the primitives' size 
+            ## Check if anchor creation is needed based on the primitives' size
             start_time = time.time()
             scene_model.place_anchor_if_needed()
             increment_runtime(runtimes["anc"], start_time)
+            # Anchor placement joins the opt thread; restart it for stream mode.
+            if is_stream and scene_model.optimization_thread is None:
+                scene_model.optimize_async(args.num_iterations)
 
             n_keyframes += 1
             if not info["is_test"]:

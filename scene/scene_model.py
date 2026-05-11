@@ -928,6 +928,9 @@ class SceneModel:
                 small_prop = small_mask.float().mean()
 
             if small_prop > small_prop_thresh:
+                # Stop optimization thread before making structural changes to
+                # avoid races on gaussian_params, active_anchor, and active_frames_gpu.
+                self.join_optimization_thread()
                 with torch.no_grad():
                     small_mask = screen_size < 1.5
                     # Update anchor positions using the camera poses used to optimize it
