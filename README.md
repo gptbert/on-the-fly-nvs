@@ -9,7 +9,7 @@
 
 <img src="assets/teaser.svg" width="100%">
 
-**Table of contents**: [Setup](#setup) | [Data Guidelines](#data-guidelines) | [Optimization](#optimization) | [Evaluation](#evaluation) | [Viewers](#interactive-viewers) | [Capture Guidelines](#capture-guidelines) | [Video Stream](#video-stream) | [Acknowledgments](#acknowledgments)
+**Table of contents**: [Setup](#setup) | [Data Guidelines](#data-guidelines) | [Optimization](#optimization) | [Evaluation](#evaluation) | [Viewers](#interactive-viewers) | [Capture Guidelines](#capture-guidelines) | [Video Stream](#video-stream) | [SuperSplat Preview](#5-previewing-in-supersplat) | [Acknowledgments](#acknowledgments)
 
 We propose a fast, on-the-fly 3D Gaussian Splatting method that jointly estimates poses and reconstructs scenes. Through fast pose initialization, direct primitive sampling, and scalable clustering and merging, it efficiently handles diverse ordered image sequences of arbitrary length.
 
@@ -376,7 +376,17 @@ python train.py -s ${STREAM_URL} --downsampling=1.5 --viewer_mode web
 > **Note:** We found that setting the stream to 1080p resolution before downsampling by a factor of 1.5 mitigates the impact of compression artifacts.
 
 ### 4. Starting the Reconstruction from the Mobile Device
-After the previous steps, the brower on the mobile devide should show the webviewer. Click the "Start" button to start the reconstruction.
+After the previous steps, the browser on the mobile device should show the webviewer. Click the "Start" button to start the reconstruction.
+
+### 5. Previewing in SuperSplat
+The web viewer provides two buttons at the top of the page for [SuperSplat](https://supersplat.playcanvas.com/) integration:
+
+- **⬇ Download PLY** — Downloads the current reconstruction as a single `.ply` file that merges all Gaussian anchors. This can be triggered at any point during or after the reconstruction.
+- **🔭 Open SuperSplat** — Opens [SuperSplat](https://supersplat.playcanvas.com/) in a new browser tab.
+
+To preview the reconstruction, click **Download PLY**, then drag the downloaded `scene.ply` into the SuperSplat window. The file can be re-downloaded at any time to get a fresh snapshot of the latest reconstruction state.
+
+> **Note:** The PLY download endpoint (`http://<server-ip>:8000/scene.ply`) is also accessible directly from any browser or tool that can load remote PLY files.
 
 <table>
   <tr width="50%">
