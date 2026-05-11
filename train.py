@@ -35,6 +35,33 @@ from webviewer.webviewer import WebViewer
 from graphdecoviewer.types import ViewerMode
 from utils import align_mean_up_fwd, increment_runtime
 
+def make_web_handler(model):
+    """Return an HTTP handler that serves /scene.ply from the live scene model."""
+    class Handler(SimpleHTTPRequestHandler):
+        """HTTP request handler: delegates /scene.ply to the live scene model."""
+
+        def do_GET(self):
+            if self.path == "/scene.ply":
+                ply_bytes = model.to_ply_bytes()
+                if not ply_bytes:
+                    self.send_error(503, "Scene not ready yet")
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Disposition", 'attachment; filename="scene.ply"')
+                self.send_header("Content-Length", str(len(ply_bytes)))
+                self.end_headers()
+                self.wfile.write(ply_bytes)
+            else:
+                super().do_GET()
+
+        def log_message(self, fmt, *msg_args):
+            if "/scene.ply" in self.path:
+                print(f"[webviewer] PLY snapshot requested – {fmt % msg_args}")
+
+    return Handler
+
+
 if __name__ == "__main__":
     torch.random.manual_seed(0)
     torch.cuda.manual_seed(0)
@@ -77,10 +104,10 @@ if __name__ == "__main__":
         viewer.throttling = True # Enable throttling when training
     elif args.viewer_mode == "web":
         ip = "0.0.0.0"
-        server = TCPServer((ip, 8000), SimpleHTTPRequestHandler)
+        server = TCPServer((ip, 8000), make_web_handler(scene_model))
         server_thd = Thread(target=server.serve_forever, daemon=True)
         server_thd.start()
-        print(f"Visit http://{ip}:8000/webviewer to for the viewer")
+        print(f"Visit http://{ip}:8000/webviewer for the viewer")
 
         viewer = WebViewer(scene_model, args.ip, args.port)
         viewer_thd = Thread(target=viewer.run, daemon=True)
@@ -89,6 +116,7 @@ if __name__ == "__main__":
     n_active_keyframes = 0
     n_keyframes = 0
     needs_reboot = False
+    last_reboot = 0
     bootstrap_keyframe_dicts = []
     bootstrap_desc_kpts = []
 
@@ -274,10 +302,13 @@ if __name__ == "__main__":
                     should_add_keyframe = False
 
         if should_add_keyframe:
-            ## Check if anchor creation is needed based on the primitives' size 
+            ## Check if anchor creation is needed based on the primitives' size
             start_time = time.time()
             scene_model.place_anchor_if_needed()
             increment_runtime(runtimes["anc"], start_time)
+            # Anchor placement joins the opt thread; restart it for stream mode.
+            if is_stream and scene_model.optimization_thread is None:
+                scene_model.optimize_async(args.num_iterations)
 
             n_keyframes += 1
             if not info["is_test"]:

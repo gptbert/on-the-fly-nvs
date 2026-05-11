@@ -11,6 +11,7 @@
 
 from argparse import Namespace
 import gc
+import io
 import os
 import json
 import math
@@ -48,6 +49,7 @@ from utils import (
     rotation_distance,
 )
 from dataloaders.read_write_model import write_model
+from plyfile import PlyData, PlyElement
 
 
 class SceneModel:
@@ -442,6 +444,53 @@ class SceneModel:
                 cv2.imwrite(
                     os.path.join(out_dir, keyframe.info["name"]), image, write_flag
                 )
+
+    @torch.no_grad()
+    def to_ply_bytes(self) -> bytes:
+        """Merge all anchors into one PLY and return as bytes for SuperSplat preview."""
+        # Clone tensors under the lock to avoid races with the optimization thread.
+        with self.lock:
+            gp_copies = [
+                {k: anchor.gaussian_params[k]["val"].detach().clone()
+                 for k in anchor.gaussian_params}
+                for anchor in self.anchors
+            ]
+
+        if not gp_copies:
+            return b""
+
+        def cat(key):
+            return np.concatenate([gp[key].cpu().numpy() for gp in gp_copies])
+
+        xyz = cat("xyz")
+        normals = np.zeros_like(xyz)
+        f_dc = np.concatenate([
+            gp["f_dc"].transpose(1, 2).flatten(start_dim=1).cpu().numpy()
+            for gp in gp_copies
+        ])
+        f_rest = np.concatenate([
+            gp["f_rest"].transpose(1, 2).flatten(start_dim=1).cpu().numpy()
+            for gp in gp_copies
+        ])
+        opacities = cat("opacity")
+        scale = cat("scaling")
+        rotation = cat("rotation")
+
+        attrs = ["x", "y", "z", "nx", "ny", "nz"]
+        attrs += [f"f_dc_{i}" for i in range(f_dc.shape[1])]
+        attrs += [f"f_rest_{i}" for i in range(f_rest.shape[1])]
+        attrs += ["opacity"]
+        attrs += [f"scale_{i}" for i in range(scale.shape[1])]
+        attrs += [f"rot_{i}" for i in range(rotation.shape[1])]
+
+        dtype_full = [(a, "f4") for a in attrs]
+        elements = np.empty(xyz.shape[0], dtype=dtype_full)
+        elements[:] = list(map(tuple, np.concatenate(
+            (xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1
+        )))
+        buf = io.BytesIO()
+        PlyData([PlyElement.describe(elements, "vertex")]).write(buf)
+        return buf.getvalue()
 
     def render_from_id(
         self,
@@ -928,6 +977,9 @@ class SceneModel:
                 small_prop = small_mask.float().mean()
 
             if small_prop > small_prop_thresh:
+                # Stop optimization thread before making structural changes to
+                # avoid races on gaussian_params, active_anchor, and active_frames_gpu.
+                self.join_optimization_thread()
                 with torch.no_grad():
                     small_mask = screen_size < 1.5
                     # Update anchor positions using the camera poses used to optimize it
