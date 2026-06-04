@@ -301,6 +301,20 @@ if __name__ == "__main__":
                 else:
                     should_add_keyframe = False
 
+        # In stream mode, tracking can be temporarily lost on fast camera motion
+        # (large baseline / motion blur -> too few matches). When that happens no
+        # keyframe is added and the async optimization thread, which was joined by
+        # get_prev_keyframes(), would otherwise be left stopped, freezing both the
+        # reconstruction and the viewer until the camera returns to a tracked view.
+        # Keep it running so the scene keeps refining and recovery stays possible.
+        if (
+            is_stream
+            and not should_add_keyframe
+            and scene_model.optimization_thread is None
+            and scene_model.n_active_gaussians > 0
+        ):
+            scene_model.optimize_async(args.num_iterations)
+
         if should_add_keyframe:
             ## Check if anchor creation is needed based on the primitives' size
             start_time = time.time()
