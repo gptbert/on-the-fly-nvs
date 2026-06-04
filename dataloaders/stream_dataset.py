@@ -34,6 +34,12 @@ class StreamDataset:
         self.retry_delay = retry_delay
         self.cap = None
 
+        # Number of frames discarded because the consumer could not keep up with
+        # the camera. A high value means processing lags the stream, which on fast
+        # motion blows up the baseline between processed frames and loses tracking.
+        self.num_dropped = 0
+        self._dropped_at_last_get = 0
+
         # Thread to get frames from the video stream
         self.capture_thd = Thread(target=self._capture_frames, daemon=True)
         self.capture_thd.start()
@@ -68,6 +74,7 @@ class StreamDataset:
 
             if not self.frame_queue.empty():
                 self.frame_queue.get()  # Discard the older frame
+                self.num_dropped += 1  # Consumer fell behind: a frame was skipped
             self.frame_queue.put(frame)
 
     def getnext(self) -> tuple[Tensor, dict]:
@@ -83,7 +90,11 @@ class StreamDataset:
                 interpolation=cv2.INTER_AREA,
             )
         image = torch.from_numpy(frame).permute(2, 0, 1).cuda().float() / 255.0
-        info = {"is_test": False}
+        # Report how many camera frames were skipped since the previous getnext so
+        # the caller can tell when processing is lagging the live stream.
+        dropped = self.num_dropped - self._dropped_at_last_get
+        self._dropped_at_last_get = self.num_dropped
+        info = {"is_test": False, "dropped": dropped}
         return image, info
 
     def get_image_size(self):

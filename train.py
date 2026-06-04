@@ -329,9 +329,13 @@ if __name__ == "__main__":
         if is_stream and n_keyframes >= args.num_keyframes_miniba_bootstrap:
             if camera_moved and not should_add_keyframe and not info["is_test"]:
                 n_lost += 1
+                # Skipped frames mean the camera is outrunning processing, which is
+                # usually the real cause of fast-motion tracking loss.
+                skipped = info.get("dropped", 0)
+                skipped_str = f", skipped {skipped} frame(s)" if skipped > 0 else ""
                 pbar.set_postfix_str(
-                    f"\033[33mTracking lost ({n_lost}) — slow down or move back "
-                    f"to a mapped area\033[0m",
+                    f"\033[33mTracking lost ({n_lost}{skipped_str}) — slow down "
+                    f"or move back to a mapped area\033[0m",
                     refresh=True,
                 )
             elif should_add_keyframe:
