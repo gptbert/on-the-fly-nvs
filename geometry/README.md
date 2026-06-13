@@ -21,6 +21,9 @@ Supported fields:
 - `depth_confidence`, `confidence`, or `conf`: depth confidence map.
 - `pointmap`, `points`, or `xyz`: optional dense/sparse 3D points for future initialization paths.
 - `metadata`: optional source-specific dictionary.
+- `pointmap_space` or `geometry_pointmap_space`: optional pointmap coordinate space.
+  Use `world` for world-space points and `camera` for camera-space points. The default is `world`.
 
 All tensor-like arrays are loaded on CPU and moved to CUDA by the dataset loader.
 Depth and confidence maps may be `H x W`, `1 x H x W`, or `H x W x 1`.
+Pointmaps may be `H x W x 3`, `3 x H x W`, or `1 x H x W x 3`.

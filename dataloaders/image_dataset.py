@@ -293,6 +293,13 @@ class ImageDataset:
         metadata = self._first_present(data, ["geometry_metadata", "metadata"])
         if isinstance(metadata, dict):
             geometry["geometry_metadata"] = metadata
+        pointmap_space = self._first_present(data, ["pointmap_space", "geometry_pointmap_space"])
+        if isinstance(pointmap_space, np.ndarray) and pointmap_space.shape == ():
+            pointmap_space = pointmap_space.item()
+        if isinstance(pointmap_space, bytes):
+            pointmap_space = pointmap_space.decode()
+        if isinstance(pointmap_space, str):
+            geometry.setdefault("geometry_metadata", {})["pointmap_space"] = pointmap_space
 
         return geometry
 

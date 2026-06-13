@@ -49,16 +49,22 @@ class Keyframe:
         self.image_pyr = [image]
         if not inference_mode: # Only extract depth and feature maps in training mode
             self.feat_map = feat_extractor(image)
+            self.width = image.shape[2]
+            self.height = image.shape[1]
             if geometry is not None and geometry.has_depth():
                 self.mono_idepth = geometry.idepth.cuda()
                 self.mono_depth_conf = geometry.depth_confidence.cuda()
             else:
                 self.mono_idepth, self.mono_depth_conf = depth_estimator(image, info)
             self.geometry_pointmap = None
+            self.geometry_pointmap_space = "world"
             if geometry is not None and geometry.pointmap is not None:
-                self.geometry_pointmap = geometry.pointmap.cuda()
-            self.width = image.shape[2]
-            self.height = image.shape[1]
+                self.geometry_pointmap = self._prepare_geometry_pointmap(
+                    geometry.pointmap.cuda()
+                )
+                self.geometry_pointmap_space = geometry.metadata.get(
+                    "pointmap_space", "world"
+                )
             self.centre = torch.tensor(
                 [(self.width - 1) / 2, (self.height - 1) / 2], device="cuda"
             )
@@ -130,6 +136,8 @@ class Keyframe:
             self.mono_idepth = self.mono_idepth.to(device)
             if self.latest_invdepth is not None:
                 self.latest_invdepth = self.latest_invdepth.to(device)
+            if self.geometry_pointmap is not None:
+                self.geometry_pointmap = self.geometry_pointmap.to(device)
 
     @property
     def device(self):
@@ -260,6 +268,47 @@ class Keyframe:
         return sample(
             self.mono_depth_conf, uv.view(1, 1, -1, 2), self.width, self.height
         )[0, 0, 0]
+
+    def _prepare_geometry_pointmap(self, pointmap: torch.Tensor):
+        if pointmap.ndim == 3 and pointmap.shape[-1] == 3:
+            pointmap = pointmap.permute(2, 0, 1)
+        elif pointmap.ndim == 4 and pointmap.shape[0] == 1:
+            pointmap = pointmap[0]
+            if pointmap.shape[-1] == 3:
+                pointmap = pointmap.permute(2, 0, 1)
+        if pointmap.ndim != 3 or pointmap.shape[0] != 3:
+            return None
+        if pointmap.shape[-2:] != (self.height, self.width):
+            pointmap = F.interpolate(
+                pointmap[None],
+                (self.height, self.width),
+                mode="bilinear",
+                align_corners=True,
+            )[0]
+        return pointmap.contiguous()
+
+    @torch.no_grad()
+    def sample_geometry_pointmap(self, uv):
+        if self.geometry_pointmap is None:
+            return None, None, None
+        sampled_pts = sample(
+            self.geometry_pointmap[None], uv.view(1, 1, -1, 2), self.width, self.height
+        )[0, :, 0].T
+        valid = torch.isfinite(sampled_pts).all(dim=-1)
+        valid &= torch.linalg.vector_norm(sampled_pts, dim=-1) > 1e-6
+
+        if self.geometry_pointmap_space == "camera":
+            depth = sampled_pts[..., 2]
+            sampled_pts = (sampled_pts - self.get_t()) @ self.get_R()
+        elif self.geometry_pointmap_space == "world":
+            cam_pts = sampled_pts @ self.get_R().T + self.get_t()
+            depth = cam_pts[..., 2]
+        else:
+            depth = torch.zeros(sampled_pts.shape[0], device=sampled_pts.device)
+            valid &= False
+
+        valid &= depth > 1e-6
+        return sampled_pts, depth, valid
 
     def zero_grad(self):
         self.optimizer.zero_grad()

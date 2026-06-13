@@ -730,17 +730,51 @@ class SceneModel:
 
         sampled_uv = self.uv[sample_mask]
         ## Initialize positions
-        # Get the samples' depth with guided stereo matching
-        prev_KFs = self.get_prev_keyframes(
-            self.guided_mvs.n_cams + 1, update_3dpts=False
+        new_pts = torch.empty(sampled_uv.shape[0], 3, device="cuda")
+        depth = torch.empty(sampled_uv.shape[0], device="cuda")
+        accurate_mask = torch.zeros(sampled_uv.shape[0], device="cuda", dtype=torch.bool)
+        valid_mask = torch.zeros(sampled_uv.shape[0], device="cuda", dtype=torch.bool)
+
+        pointmap_pts, pointmap_depth, pointmap_valid = keyframe.sample_geometry_pointmap(
+            sampled_uv
         )
-        for i, prev_keyframe in enumerate(prev_KFs):
-            if keyframe.index == prev_keyframe.index:
-                prev_KFs.pop(i)
-                break
-        depth, accurate_mask = self.guided_mvs(sampled_uv, keyframe, prev_KFs)
-        valid_mask = (keyframe.sample_conf(sampled_uv) > 0.5) * (depth > 1e-6)
+        if pointmap_pts is not None:
+            pointmap_valid &= keyframe.sample_conf(sampled_uv) > 0.5
+            new_pts[pointmap_valid] = pointmap_pts[pointmap_valid]
+            depth[pointmap_valid] = pointmap_depth[pointmap_valid]
+            accurate_mask[pointmap_valid] = True
+            valid_mask |= pointmap_valid
+
+        fallback_mask = ~valid_mask
+        if fallback_mask.any():
+            fallback_uv = sampled_uv[fallback_mask]
+            # Get the remaining samples' depth with guided stereo matching.
+            prev_KFs = self.get_prev_keyframes(
+                self.guided_mvs.n_cams + 1, update_3dpts=False
+            )
+            for i, prev_keyframe in enumerate(prev_KFs):
+                if keyframe.index == prev_keyframe.index:
+                    prev_KFs.pop(i)
+                    break
+            fallback_depth, fallback_accurate = self.guided_mvs(
+                fallback_uv, keyframe, prev_KFs
+            )
+            fallback_valid = (
+                (keyframe.sample_conf(fallback_uv) > 0.5) * (fallback_depth > 1e-6)
+            )
+            fallback_pts = depth2points(
+                fallback_uv, fallback_depth.unsqueeze(-1), self.f, self.centre
+            )
+            fallback_pts = (fallback_pts - keyframe.get_t()) @ keyframe.get_R()
+            fallback_indices = torch.where(fallback_mask)[0]
+            valid_fallback_indices = fallback_indices[fallback_valid]
+            new_pts[valid_fallback_indices] = fallback_pts[fallback_valid]
+            depth[valid_fallback_indices] = fallback_depth[fallback_valid]
+            accurate_mask[valid_fallback_indices] = fallback_accurate[fallback_valid]
+            valid_mask[valid_fallback_indices] = True
+
         sample_mask[sample_mask.clone()] = valid_mask
+        new_pts = new_pts[valid_mask]
         depth = depth[valid_mask]
         sampled_uv = sampled_uv[valid_mask]
         accurate_mask = accurate_mask[valid_mask]
@@ -768,13 +802,11 @@ class SceneModel:
         if rendered_depth is not None:
             valid_mask = depth < rendered_depth[sample_mask]
             sample_mask[sample_mask.clone()] = valid_mask
+            new_pts = new_pts[valid_mask]
             depth = depth[valid_mask]
             sampled_uv = sampled_uv[valid_mask]
             accurate_mask = accurate_mask[valid_mask]
 
-        # Get the samples' 3D positions
-        new_pts = depth2points(sampled_uv, depth.unsqueeze(-1), self.f, self.centre)
-        new_pts = (new_pts - keyframe.get_t()) @ keyframe.get_R()
         # Add points from matching
         match_pts = keyframe.desc_kpts.pts3d[keyframe.desc_kpts.has_pt3d]
         new_pts = torch.cat([new_pts, match_pts], dim=0)
