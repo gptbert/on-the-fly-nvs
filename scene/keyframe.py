@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 from argparse import Namespace
+from typing import TYPE_CHECKING
 import torch
 import torch.nn.functional as F
 
@@ -21,6 +22,9 @@ from scene.mono_depth import MonoDepthEstimator, align_depth
 from scene.optimizers import BaseAdam
 from utils import sample, sixD2mtx, make_torch_sampler, depth2points
 from dataloaders.read_write_model import Camera, BaseImage, rotmat2qvec
+
+if TYPE_CHECKING:
+    from geometry.provider import GeometryFrame
 
 
 class Keyframe:
@@ -39,12 +43,20 @@ class Keyframe:
         depth_estimator: MonoDepthEstimator,
         triangulator: Triangulator,
         args: Namespace,
+        geometry: GeometryFrame | None = None,
         inference_mode: bool = False,
     ):
         self.image_pyr = [image]
         if not inference_mode: # Only extract depth and feature maps in training mode
             self.feat_map = feat_extractor(image)
-            self.mono_idepth, self.mono_depth_conf = depth_estimator(image)
+            if geometry is not None and geometry.has_depth():
+                self.mono_idepth = geometry.idepth.cuda()
+                self.mono_depth_conf = geometry.depth_confidence.cuda()
+            else:
+                self.mono_idepth, self.mono_depth_conf = depth_estimator(image, info)
+            self.geometry_pointmap = None
+            if geometry is not None and geometry.pointmap is not None:
+                self.geometry_pointmap = geometry.pointmap.cuda()
             self.width = image.shape[2]
             self.height = image.shape[1]
             self.centre = torch.tensor(

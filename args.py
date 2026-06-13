@@ -39,6 +39,10 @@ def get_args():
                         help="Compare poses to COLMAP")
     parser.add_argument('--use_colmap_poses', action='store_true',
                         help="Load COLMAP data for pose and intrinsics initialization")
+    parser.add_argument('--geometry_provider',
+                        choices=['default', 'external', 'arkit', 'arcore', 'mast3r', 'mast3r_slam', 'vggt', 'cut3r'],
+                        default='default',
+                        help="Geometry source for pose/depth/pointmap priors. Non-default providers read geometry_* entries from dataset info and fall back to the default provider when absent.")
         
     ## Learning Rates
     parser.add_argument('--lr_poses', type=float, default=1e-4, help="Pose learning rate")

@@ -904,7 +904,7 @@ class SceneModel:
 
         ## Update intrinsics
         if f is not None:
-            self.f = f.item()
+            self.f = f.item() if torch.is_tensor(f) else float(f)
             self.init_intrinsics()
 
         ## Update cached Rts for the viewer

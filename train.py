@@ -24,12 +24,11 @@ from dataloaders.image_dataset import ImageDataset
 from dataloaders.stream_dataset import StreamDataset
 from poses.feature_detector import Detector
 from poses.matcher import Matcher
-from poses.pose_initializer import PoseInitializer
 from poses.triangulator import Triangulator
 from scene.dense_extractor import DenseExtractor
 from scene.keyframe import Keyframe
-from scene.mono_depth import MonoDepthEstimator
 from scene.scene_model import SceneModel
+from geometry.provider import make_geometry_provider
 from gaussianviewer import GaussianViewer
 from webviewer.webviewer import WebViewer
 from graphdecoviewer.types import ViewerMode
@@ -62,6 +61,10 @@ def make_web_handler(model):
     return Handler
 
 
+def focal_to_float(focal):
+    return focal.detach().cpu().item() if torch.is_tensor(focal) else float(focal)
+
+
 if __name__ == "__main__":
     torch.random.manual_seed(0)
     torch.cuda.manual_seed(0)
@@ -86,12 +89,11 @@ if __name__ == "__main__":
     triangulator = Triangulator(
         args.num_kpts, args.num_prev_keyframes_miniba_incr, max_error
     )
-    pose_initializer = PoseInitializer(
-        width, height, triangulator, matcher, 2 * max_error, args
+    geometry_provider = make_geometry_provider(
+        args.geometry_provider, width, height, triangulator, matcher, 2 * max_error, args
     )
-    focal = pose_initializer.f_init
+    focal = geometry_provider.f_init
     dense_extractor = DenseExtractor(width, height)
-    depth_estimator = MonoDepthEstimator(width, height)
     scene_model = SceneModel(width, height, args, matcher)
     detector = Detector(args.num_kpts, width, height)
 
@@ -185,16 +187,20 @@ if __name__ == "__main__":
 
             if n_keyframes == args.num_keyframes_miniba_bootstrap - 1:
                 start_time = time.time()
-                Rts, f, _ = pose_initializer.initialize_bootstrap(bootstrap_desc_kpts)
-                focal = f.cpu().item()
+                Rts, f, _ = geometry_provider.initialize_bootstrap(
+                    bootstrap_desc_kpts, bootstrap_keyframe_dicts
+                )
+                focal = focal_to_float(f)
                 increment_runtime(runtimes["BAB"], start_time)
                 for index, (keyframe_dict, desc_kpts, Rt) in enumerate(
                     zip(bootstrap_keyframe_dicts, bootstrap_desc_kpts, Rts)
                 ):
                     start_time = time.time()
-                    if args.use_colmap_poses:
-                        Rt = keyframe_dict["info"]["Rt"]
-                        f = keyframe_dict["info"]["focal"]
+                    geometry = geometry_provider.estimate_frame_geometry(
+                        keyframe_dict["image"], keyframe_dict["info"]
+                    )
+                    geometry.Rt = Rt
+                    geometry.focal = f
                     keyframe = Keyframe(
                         keyframe_dict["image"],
                         keyframe_dict["info"],
@@ -203,9 +209,10 @@ if __name__ == "__main__":
                         index,
                         f,
                         dense_extractor,
-                        depth_estimator,
+                        geometry_provider,
                         triangulator,
                         args,
+                        geometry,
                     )
                     scene_model.add_keyframe(keyframe, f)
                     increment_runtime(runtimes["Add"], start_time)
@@ -245,7 +252,7 @@ if __name__ == "__main__":
                 bs_kfs = scene_model.keyframes[-8:]
                 bootstrap_desc_kpts = [bs_kf.desc_kpts for bs_kf in bs_kfs]
                 in_Rts = torch.stack([kf.get_Rt() for kf in bs_kfs])
-                Rts, _, final_residual = pose_initializer.initialize_bootstrap(
+                Rts, _, final_residual = geometry_provider.initialize_bootstrap(
                     bootstrap_desc_kpts, rebooting=True
                 )
                 # Check if the reboot succeeded
@@ -271,14 +278,19 @@ if __name__ == "__main__":
                 )
                 increment_runtime(runtimes["tri"], start_time)
                 start_time = time.time()
-                Rt = pose_initializer.initialize_incremental(
-                    prev_keyframes, desc_kpts, n_keyframes, info["is_test"], image
+                geometry = geometry_provider.initialize_incremental(
+                    prev_keyframes, desc_kpts, n_keyframes, info["is_test"], image, info
                 )
+                Rt = geometry.Rt
                 increment_runtime(runtimes["BAI"], start_time)
                 start_time = time.time()
                 if Rt is not None:
-                    if args.use_colmap_poses:
-                        Rt = info["Rt"]
+                    frame_geometry = geometry_provider.estimate_frame_geometry(image, info)
+                    frame_geometry.Rt = Rt
+                    if geometry.focal is not None:
+                        frame_geometry.focal = geometry.focal
+                    if geometry.pointmap is not None:
+                        frame_geometry.pointmap = geometry.pointmap
                     keyframe = Keyframe(
                         image,
                         info,
@@ -287,9 +299,10 @@ if __name__ == "__main__":
                         n_keyframes,
                         f,
                         dense_extractor,
-                        depth_estimator,
+                        geometry_provider,
                         triangulator,
                         args,
+                        frame_geometry,
                     )
                     scene_model.add_keyframe(keyframe)
                     prev_keyframe = keyframe
