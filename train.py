@@ -115,6 +115,7 @@ if __name__ == "__main__":
 
     n_active_keyframes = 0
     n_keyframes = 0
+    n_lost = 0  # consecutive frames where tracking was lost (stream mode)
     needs_reboot = False
     last_reboot = 0
     bootstrap_keyframe_dicts = []
@@ -161,9 +162,15 @@ if __name__ == "__main__":
         curr_prev_matches = matcher(desc_kpts, prev_desc_kpts)
         # Determine if we should add a keyframe based on the matches
         dist = torch.norm(curr_prev_matches.kpts - curr_prev_matches.kpts_other, dim=-1)
+        n_matches = len(curr_prev_matches.kpts)
+        median_disp = dist.median().item() if n_matches > 0 else float("inf")
+        # Whether the camera appears to have moved away from the current reference.
+        # Too few matches (fast motion / motion blur) also means we lost enough
+        # overlap to track, as opposed to the camera simply being still.
+        camera_moved = median_disp > min_displacement or n_matches <= args.min_num_inliers
         should_add_keyframe = (
-            dist.median() > min_displacement
-            and len(curr_prev_matches.kpts) > args.min_num_inliers
+            median_disp > min_displacement
+            and n_matches > args.min_num_inliers
         )
         # Always add test frames so we estimate their poses
         should_add_keyframe |= info["is_test"]
@@ -300,6 +307,39 @@ if __name__ == "__main__":
                     increment_runtime(runtimes["Opt"], start_time)
                 else:
                     should_add_keyframe = False
+
+        # In stream mode, tracking can be temporarily lost on fast camera motion
+        # (large baseline / motion blur -> too few matches). When that happens no
+        # keyframe is added and the async optimization thread, which was joined by
+        # get_prev_keyframes(), would otherwise be left stopped, freezing both the
+        # reconstruction and the viewer until the camera returns to a tracked view.
+        # Keep it running so the scene keeps refining and recovery stays possible.
+        if (
+            is_stream
+            and not should_add_keyframe
+            and scene_model.optimization_thread is None
+            and scene_model.n_active_gaussians > 0
+        ):
+            scene_model.optimize_async(args.num_iterations)
+
+        # Surface tracking status so a live capture isn't a silently stalled bar.
+        # Tracking is lost when the camera clearly moved but the frame could not be
+        # registered (fast motion / motion blur), as opposed to the camera being
+        # still. Only meaningful once we are past the bootstrap phase.
+        if is_stream and n_keyframes >= args.num_keyframes_miniba_bootstrap:
+            if camera_moved and not should_add_keyframe and not info["is_test"]:
+                n_lost += 1
+                # Skipped frames mean the camera is outrunning processing, which is
+                # usually the real cause of fast-motion tracking loss.
+                skipped = info.get("dropped", 0)
+                skipped_str = f", skipped {skipped} frame(s)" if skipped > 0 else ""
+                pbar.set_postfix_str(
+                    f"\033[33mTracking lost ({n_lost}{skipped_str}) — slow down "
+                    f"or move back to a mapped area\033[0m",
+                    refresh=True,
+                )
+            elif should_add_keyframe:
+                n_lost = 0
 
         if should_add_keyframe:
             ## Check if anchor creation is needed based on the primitives' size
