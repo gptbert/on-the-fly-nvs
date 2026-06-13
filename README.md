@@ -9,7 +9,7 @@
 
 <img src="assets/teaser.svg" width="100%">
 
-**Table of contents**: [Setup](#setup) | [Data Guidelines](#data-guidelines) | [Optimization](#optimization) | [Evaluation](#evaluation) | [Viewers](#interactive-viewers) | [Capture Guidelines](#capture-guidelines) | [Video Stream](#video-stream) | [SuperSplat Preview](#5-previewing-in-supersplat) | [Acknowledgments](#acknowledgments)
+**Table of contents**: [Setup](#setup) | [Docker Setup](#docker-setup) | [Data Guidelines](#data-guidelines) | [External Geometry Priors](#external-geometry-priors) | [Optimization](#optimization) | [Evaluation](#evaluation) | [Viewers](#interactive-viewers) | [Capture Guidelines](#capture-guidelines) | [Video Stream](#video-stream) | [SuperSplat Preview](#5-previewing-in-supersplat) | [Acknowledgments](#acknowledgments)
 
 We propose a fast, on-the-fly 3D Gaussian Splatting method that jointly estimates poses and reconstructs scenes. Through fast pose initialization, direct primitive sampling, and scalable clustering and merging, it efficiently handles diverse ordered image sequences of arbitrary length.
 
@@ -106,6 +106,43 @@ conda activate &lt;env_path&gt;/onthefly_nvs
 Where <code>&lt;pkg_path&gt;</code> is the desired package download location and <code>&lt;env_path&gt;/onthefly_nvs</code> is the desired environment location.
 </details>
 
+## Docker Setup
+The repository includes a CUDA 12.8 Docker image and a Docker Compose service for running the web reconstruction server. The Compose setup does not require Tailscale; it exposes the required ports directly on the host:
+
+- `2222` -> container SSH port `22`
+- `6009` -> viewer server port
+- `8000` -> web viewer and `scene.ply` endpoint
+
+Build the image:
+```bash
+docker compose build
+```
+
+Run a phone video stream reconstruction:
+```bash
+STREAM_URL="http://<phone-ip>:<port>/video" docker compose up
+```
+
+Then open the web viewer from another device on the same network:
+```text
+http://<server-ip>:8000/webviewer
+```
+
+Optional environment variables:
+```bash
+STREAM_URL="http://<phone-ip>:<port>/video"
+DOWNSAMPLING=1.5
+DEPTH_MODEL=vitb        # vits, vitb, or vitl
+SSH_PUBLIC_KEY="$(cat ~/.ssh/id_rsa.pub)"
+```
+
+If `SSH_PUBLIC_KEY` is set, SSH is available on the host port:
+```bash
+ssh -p 2222 root@<server-ip>
+```
+
+Results are written to `./results`, and model/dependency caches are stored in Docker volumes.
+
 ## Data Guidelines
 > Please note that our method **is not a drop-in replacement for COLMAP + 3DGS, as it does not reorder images**. We require sequential capture that implies several constraints on the kind of data that can be handled. Please follow the **[Capture Guidelines](#capture-guidelines) for best results on your own data.**
 
@@ -122,6 +159,49 @@ python scripts/download_datasets.py --out_dir data/ --datasets MipNeRF360 # or T
 ```
 
 For best results, we recommend using a high-quality camera and providing still photographs to the method. We provide an experimental prototype for reconstruction from a [Video Stream](#video-stream) that will not provide the same level of quality.
+
+## External Geometry Priors
+The default pipeline still performs on-the-fly pose initialization, depth estimation, Gaussian initialization, and joint optimization internally. For newer mobile-capture workflows, the recommended extension path is to use a separate geometry provider for stronger pose, depth, and pointmap priors, while keeping this repository's `SceneModel` responsible for 3D Gaussian optimization.
+
+This is useful when preprocessing phone videos or image sequences with external geometry frontends such as MASt3R-SLAM, VGGT, CUT3R, ARKit, ARCore, or another system that can export camera poses, depth maps, confidence maps, or pointmaps. External priors are optional per frame: if a sidecar omits a field, the trainer falls back to the default internal path for that field.
+
+The supported flow is:
+```text
+phone images/video
+  -> external geometry frontend
+  -> per-frame sidecars in ${SOURCE_PATH}/geometry
+  -> train.py --geometry_provider external
+  -> SceneModel Gaussian initialization and optimization
+```
+
+Sidecar files are matched by image stem:
+```text
+${SOURCE_PATH}/images/0001.jpg
+${SOURCE_PATH}/geometry/0001.npz
+```
+
+Supported sidecar formats are `.npz`, `.pt`, `.pth`, and `.json`. Supported fields include:
+
+- Pose: `Rt`, `w2c`, `T_cw`, `world_to_camera`, or camera-to-world fields `c2w`, `T_wc`, `camera_to_world`.
+- Intrinsics: `focal`, `fx`, `K`, or `intrinsics`.
+- Depth: `idepth`, `inverse_depth`, `inv_depth`, `depth`, or `metric_depth`.
+- Confidence: `depth_confidence`, `confidence`, or `conf`.
+- Pointmap: `pointmap`, `points`, or `xyz`.
+- Pointmap coordinate space: `pointmap_space` or `geometry_pointmap_space`, with `world` or `camera`.
+
+Run with external geometry priors:
+```bash
+python train.py -s ${SOURCE_PATH} -m ${MODEL_PATH} --geometry_provider external
+```
+
+Use a custom sidecar directory:
+```bash
+python train.py -s ${SOURCE_PATH} -m ${MODEL_PATH} --geometry_provider external --geometry_dir mast3r_geometry
+```
+
+When a valid pointmap is available, sampled pointmap positions are used directly to initialize new Gaussians. Invalid, missing, low-confidence, or occluded samples fall back to the default guided MVS initialization.
+
+See [`geometry/README.md`](geometry/README.md) for the full sidecar schema.
 
 ## Optimization
 The following command runs the reconstruction and saves the model. If `-m` is not provided, the model will be saved in `results/xxxxxx/`.
@@ -161,6 +241,10 @@ python train.py -s data/MipNeRF360/garden -m results/MipNeRF360/garden
   Compare poses to COLMAP.
   #### --use_colmap_poses
   Load COLMAP data for pose and intrinsics initialization.
+  #### --geometry_provider
+  Geometry source for pose/depth/pointmap priors. Use `default` for the original internal pipeline, or `external` for per-frame sidecars. Aliases such as `arkit`, `arcore`, `mast3r`, `mast3r_slam`, `vggt`, and `cut3r` currently use the same sidecar adapter.
+  #### --geometry_dir
+  Optional sidecar directory under `source_path`, `geometry` by default.
   #### --test_hold
   Holdout for test set, will exclude every test_hold image from the Gaussian optimization and use them for testing. The test frames will still be used for training the pose. If set to -1, no keyframes will be excluded from training.
   #### --test_frequency
