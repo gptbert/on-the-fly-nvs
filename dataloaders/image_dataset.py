@@ -10,6 +10,7 @@
 #
 
 import cv2
+import json
 import os
 import numpy as np
 import torch
@@ -82,6 +83,13 @@ class ImageDataset:
 
         # Load COLMAP data
         self.load_colmap_data(os.path.join(args.source_path, "sparse/0"))
+        self.geometry_dir = (
+            os.path.join(args.source_path, args.geometry_dir)
+            if args.geometry_provider != "default" and args.geometry_dir
+            else None
+        )
+        if self.geometry_dir:
+            self.load_external_geometry(self.geometry_dir)
 
         # Check that all images have poses
         has_all_poses = all(
@@ -107,7 +115,7 @@ class ImageDataset:
     def __getitem__(self, index):
         image_path = self.image_paths[index]
         image = self._load_image(image_path, cv2.IMREAD_UNCHANGED)
-        info = self.infos[os.path.basename(image_path)]
+        info = self._copy_info_to_cuda(self.infos[os.path.basename(image_path)])
         if image.shape[0] == 4:
             info["mask"] = image[-1][None].cpu()
             image = image[:3]
@@ -115,6 +123,15 @@ class ImageDataset:
             mask = self._load_image(self.mask_paths[index])
             info["mask"] = mask[0][None]
         return image.cuda(), info
+
+    def _copy_info_to_cuda(self, info):
+        copied_info = {}
+        for key, value in info.items():
+            if key.startswith("geometry_") and torch.is_tensor(value):
+                copied_info[key] = value.cuda()
+            else:
+                copied_info[key] = value
+        return copied_info
 
     def _load_image(self, image_path, mode=cv2.IMREAD_COLOR):
         image = cv2.imread(image_path, mode)
@@ -187,6 +204,119 @@ class ImageDataset:
             if image.name in self.infos:
                 self.infos[name]["Rt"] = torch.tensor(Rt, device="cuda")
                 self.infos[name]["focal"] = torch.tensor([focal], device="cuda").float()
+
+    def load_external_geometry(self, geometry_dir):
+        """Load optional per-image geometry sidecars for external geometry providers."""
+        if not os.path.isdir(geometry_dir):
+            logging.warning(f" Geometry directory not found: {geometry_dir}")
+            return
+
+        loaded = 0
+        for image_name in self.image_name_list:
+            stem = os.path.splitext(image_name)[0]
+            sidecar_path = None
+            for ext in [".npz", ".pt", ".pth", ".json"]:
+                candidate = os.path.join(geometry_dir, stem + ext)
+                if os.path.exists(candidate):
+                    sidecar_path = candidate
+                    break
+            if sidecar_path is None:
+                continue
+
+            geometry = self._read_geometry_sidecar(sidecar_path)
+            if not geometry:
+                continue
+            self.infos[image_name].update(geometry)
+            loaded += 1
+
+        if loaded == 0:
+            logging.warning(f" No geometry sidecars found in {geometry_dir}")
+        elif loaded != len(self.image_name_list):
+            logging.warning(
+                f" Loaded geometry sidecars for {loaded}/{len(self.image_name_list)} images."
+            )
+
+    def _read_geometry_sidecar(self, path):
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".npz":
+            npz = np.load(path, allow_pickle=True)
+            data = {key: npz[key] for key in npz.files}
+        elif ext in [".pt", ".pth"]:
+            data = torch.load(path, map_location="cpu")
+        elif ext == ".json":
+            with open(path) as f:
+                data = json.load(f)
+        else:
+            return {}
+
+        geometry = {}
+        Rt = self._first_present(data, ["geometry_Rt", "Rt", "w2c", "T_cw", "world_to_camera"])
+        if Rt is None:
+            c2w = self._first_present(data, ["c2w", "T_wc", "camera_to_world"])
+            if c2w is not None:
+                Rt = torch.linalg.inv(self._as_tensor(c2w, dtype=torch.float32))
+        if Rt is not None:
+            geometry["geometry_Rt"] = self._as_tensor(Rt, dtype=torch.float32)
+
+        focal = self._first_present(data, ["geometry_focal", "focal", "fx"])
+        if focal is None and "intrinsics" in data:
+            K = self._as_tensor(data["intrinsics"], dtype=torch.float32)
+            focal = (K[0, 0] + K[1, 1]) * 0.5
+        if focal is None and "K" in data:
+            K = self._as_tensor(data["K"], dtype=torch.float32)
+            focal = (K[0, 0] + K[1, 1]) * 0.5
+        if focal is not None:
+            geometry["geometry_focal"] = self._as_tensor(focal, dtype=torch.float32).reshape(-1)[:1]
+
+        idepth = self._first_present(data, ["geometry_idepth", "idepth", "inverse_depth", "inv_depth"])
+        if idepth is None:
+            depth = self._first_present(data, ["geometry_depth", "depth", "metric_depth"])
+            if depth is not None:
+                depth = self._as_tensor(depth, dtype=torch.float32)
+                idepth = 1.0 / depth.clamp_min(1e-6)
+        if idepth is not None:
+            geometry["geometry_idepth"] = self._ensure_chw(self._as_tensor(idepth, dtype=torch.float32))
+
+        confidence = self._first_present(
+            data,
+            ["geometry_depth_confidence", "depth_confidence", "confidence", "conf"],
+        )
+        if confidence is not None:
+            geometry["geometry_depth_confidence"] = self._ensure_chw(
+                self._as_tensor(confidence, dtype=torch.float32)
+            )
+
+        pointmap = self._first_present(data, ["geometry_pointmap", "pointmap", "points", "xyz"])
+        if pointmap is not None:
+            geometry["geometry_pointmap"] = self._as_tensor(pointmap, dtype=torch.float32)
+
+        metadata = self._first_present(data, ["geometry_metadata", "metadata"])
+        if isinstance(metadata, dict):
+            geometry["geometry_metadata"] = metadata
+
+        return geometry
+
+    def _first_present(self, data, keys):
+        for key in keys:
+            if key in data:
+                return data[key]
+        return None
+
+    def _as_tensor(self, value, dtype=None):
+        if torch.is_tensor(value):
+            tensor = value.detach().cpu()
+        else:
+            tensor = torch.tensor(value)
+        if dtype is not None:
+            tensor = tensor.to(dtype)
+        return tensor
+
+    def _ensure_chw(self, tensor):
+        if tensor.ndim == 2:
+            tensor = tensor[None]
+        elif tensor.ndim == 3 and tensor.shape[-1] == 1:
+            tensor = tensor.permute(2, 0, 1)
+        return tensor
 
     def align_colmap_poses(self):
         """Scale and set first Rt as identity"""

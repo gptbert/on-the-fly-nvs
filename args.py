@@ -43,6 +43,8 @@ def get_args():
                         choices=['default', 'external', 'arkit', 'arcore', 'mast3r', 'mast3r_slam', 'vggt', 'cut3r'],
                         default='default',
                         help="Geometry source for pose/depth/pointmap priors. Non-default providers read geometry_* entries from dataset info and fall back to the default provider when absent.")
+    parser.add_argument('--geometry_dir', type=str, default='geometry',
+                        help="Optional source_path/geometry_dir containing per-image geometry sidecars for external providers.")
         
     ## Learning Rates
     parser.add_argument('--lr_poses', type=float, default=1e-4, help="Pose learning rate")

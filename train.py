@@ -291,20 +291,23 @@ if __name__ == "__main__":
                         frame_geometry.focal = geometry.focal
                     if geometry.pointmap is not None:
                         frame_geometry.pointmap = geometry.pointmap
+                    frame_f = frame_geometry.focal if frame_geometry.focal is not None else f
                     keyframe = Keyframe(
                         image,
                         info,
                         desc_kpts,
                         Rt,
                         n_keyframes,
-                        f,
+                        frame_f,
                         dense_extractor,
                         geometry_provider,
                         triangulator,
                         args,
                         frame_geometry,
                     )
-                    scene_model.add_keyframe(keyframe)
+                    scene_model.add_keyframe(
+                        keyframe, frame_f if frame_geometry.focal is not None else None
+                    )
                     prev_keyframe = keyframe
                     increment_runtime(runtimes["Add"], start_time)
                     # Gaussian initialization
