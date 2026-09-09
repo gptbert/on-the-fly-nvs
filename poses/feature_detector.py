@@ -12,8 +12,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os
 
+from model_store import get_model_store
 from poses.matcher import Matches
 
 class DescribedKeypoints():
@@ -90,13 +90,15 @@ class InterpolateSparse2d(nn.Module):
 class Detector():
     @torch.no_grad()
     def __init__(self, top_k, width, height):
-        cache_path = f"models/cache/xfeat_{width}_{height}_{top_k}.pt"
+        model_store = get_model_store()
+        cache_name = f"xfeat_{width}_{height}_{top_k}.pt"
+        cache_path = model_store.jit_path(cache_name)
         dummy_img = torch.randn(1, 3, height, width).cuda().to(torch.half)
-        if os.path.exists(cache_path):
-            extractor = torch.jit.load(cache_path)
+        if cache_path.is_file():
+            extractor = torch.jit.load(str(cache_path))
         else:
             print(f"Compiling feature extractor")
-            extractor = torch.hub.load('verlab/accelerated_features', 'XFeat', pretrained=True, top_k=top_k)
+            extractor = model_store.load_xfeat(top_k=top_k)
             extractor = extractor.cuda().eval().to(torch.half)
 
             ## Overriding the functions to run at fixed size
@@ -172,13 +174,11 @@ class Detector():
             extractor.forward = detectAndCompute
 
             extractor = torch.jit.trace(extractor, [dummy_img])
-            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-            torch.jit.save(extractor, cache_path)
-            extractor = torch.jit.load(cache_path)
+            model_store.save_jit(extractor, cache_name)
+            extractor = torch.jit.load(str(cache_path))
 
         self.extractor = extractor
 
     @torch.no_grad()
     def __call__(self, image):
         return DescribedKeypoints(*(self.extractor(image[None].half())))
-    

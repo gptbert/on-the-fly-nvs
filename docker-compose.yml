@@ -15,6 +15,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
       - STREAM_URL=${STREAM_URL:-}
       - MODEL_PATH=${MODEL_PATH:-/app/results}
+      - MODELS_DIR=/app/models
       - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
       - CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
       # Depth model: vits (fastest), vitb (balanced), vitl (best quality)
@@ -22,14 +23,13 @@ services:
       # Downsampling factor: higher = smaller image = faster (1.5 default, try 2.0 or 3.0)
       - DOWNSAMPLING=${DOWNSAMPLING:-1.5}
       # HuggingFace mirror for faster model download in China
-      - HF_ENDPOINT=https://hf-mirror.com
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
       # FFmpeg auto-reconnect for MJPEG HTTP stream (IP Camera Lite uses HTTP/1.0)
       - OPENCV_FFMPEG_CAPTURE_OPTIONS=reconnect;1|reconnect_streamed;1|reconnect_delay_max;2|timeout;60000000
     volumes:
-      - model_cache:/cache
+      - ${MODELS_DIR:-./models}:/app/models
       - cupy_cache:/root/.cupy
       - ./results:/app/results
-      - depth_models:/cache/models
     deploy:
       resources:
         reservations:
@@ -42,6 +42,4 @@ services:
     tty: true
 
 volumes:
-  model_cache:
   cupy_cache:
-  depth_models:

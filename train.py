@@ -29,6 +29,7 @@ from scene.dense_extractor import DenseExtractor
 from scene.keyframe import Keyframe
 from scene.scene_model import SceneModel
 from geometry.provider import make_geometry_provider
+from model_store import get_model_store
 from gaussianviewer import GaussianViewer
 from webviewer.webviewer import WebViewer
 from graphdecoviewer.types import ViewerMode
@@ -71,6 +72,7 @@ if __name__ == "__main__":
     np.random.seed(0)
 
     args = get_args()
+    print(f"Model directory: {get_model_store().root}")
 
     # Initialize dataloader
     if "://" in args.source_path:

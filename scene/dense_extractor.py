@@ -11,22 +11,24 @@
 
 import torch
 import torch.nn.functional as F
-import os
 import copy
 
-from scene.extractor_model import *
+from model_store import get_model_store
+from scene.extractor_model import XFeatModel
 
 class DenseExtractor():
     """Extract dense feature maps from an image."""
     @torch.no_grad()
     def __init__(self, width, height):
-        cache_path = f"models/cache/dense_extractor_{width}_{height}.pt"
+        model_store = get_model_store()
+        cache_name = f"dense_extractor_{width}_{height}.pt"
+        cache_path = model_store.jit_path(cache_name)
         dummy_img = torch.randn(1, 3, height, width).cuda().to(torch.half)
         
-        if os.path.exists(cache_path):
-            self.extractor = torch.jit.load(cache_path)
+        if cache_path.is_file():
+            self.extractor = torch.jit.load(str(cache_path))
         else:
-            self.extractor = torch.hub.load('verlab/accelerated_features', 'XFeat', pretrained = True, top_k = 4096)
+            self.extractor = model_store.load_xfeat(top_k=4096)
             self.extractor = self.extractor.half().cuda().eval()
 
             state_dict = copy.deepcopy(self.extractor.state_dict())
@@ -55,12 +57,10 @@ class DenseExtractor():
 
             self.extractor = torch.jit.trace(self.extractor, [dummy_img])
             self.extractor = torch.jit.script(self.extractor)
-            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-            torch.jit.save(self.extractor, cache_path)
+            model_store.save_jit(self.extractor, cache_name)
 
         self.extractor(torch.rand_like(dummy_img))
 
     @torch.no_grad()
     def __call__(self, image):
         return self.extractor(image[None].half())
-    

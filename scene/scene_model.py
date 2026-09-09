@@ -23,7 +23,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-import lpips
+from model_store import get_model_store
 from fused_ssim import fused_ssim
 from diff_gaussian_rasterization import (
     GaussianRasterizationSettings,
@@ -80,15 +80,12 @@ class SceneModel:
         self.optimization_thread = None
 
         try:
-            import sys
-
-            original_stdout = sys.stdout
-            sys.stdout = open(os.devnull, "w")
-            warnings.filterwarnings("ignore")
-            self.lpips = lpips.LPIPS(net="vgg").cuda()
-            sys.stdout = original_stdout
-        except:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.lpips = get_model_store().load_lpips().cuda()
+        except Exception as error:
             self.lpips = None
+            warnings.warn(f"LPIPS unavailable: {error}", RuntimeWarning)
 
         if not inference_mode:
             self.num_prev_keyframes_check = args.num_prev_keyframes_check

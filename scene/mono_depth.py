@@ -12,35 +12,25 @@
 import torch
 import os
 import sys
-import urllib.request
 import torch.nn.functional as F
 
+from model_store import PROJECT_ROOT, get_model_store
 from poses.feature_detector import DescribedKeypoints
 from utils import sample
 
-sys.path.append("submodules/Depth-Anything-V2")
+sys.path.append(str(PROJECT_ROOT / "submodules" / "Depth-Anything-V2"))
 os.environ["XFORMERS_FORCE_DISABLE_TRITON"] = "1"
-from depth_anything_v2.dpt import DepthAnythingV2
 
 size = 518
-encoder = os.environ.get("DEPTH_MODEL", "vitb")
 
 
 class MonoDepthInternal(torch.nn.Module):
     def __init__(self):
         super(MonoDepthInternal, self).__init__()
-        model_path = os.environ.get("DEPTH_MODEL_PATH", f"/cache/models/depth_anything_v2_{encoder}.pth")
-        if not os.path.exists(model_path):
-            print(f"Downloading Depth-Anything-V2 model for {encoder}, may take a few minutes...")
-            model_sizes = {
-                "vits": "Small",
-                "vitb": "Base",
-                "vitl": "Large",
-                "vitg": "Giant",
-            }
-            url = f"https://huggingface.co/depth-anything/Depth-Anything-V2-{model_sizes[encoder]}/resolve/main/depth_anything_v2_{encoder}.pth"
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            urllib.request.urlretrieve(url, model_path)
+        encoder = os.environ.get("DEPTH_MODEL", "vitb")
+        model_path = get_model_store().depth_checkpoint(encoder)
+        from depth_anything_v2.dpt import DepthAnythingV2
+
         model_configs = {
             "vits": {
                 "encoder": "vits",

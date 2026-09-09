@@ -8,6 +8,7 @@ dist
 build
 results/
 data/
+models/
 *.ply
 *.pth
 *.pt

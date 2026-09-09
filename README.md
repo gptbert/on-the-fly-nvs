@@ -9,7 +9,7 @@
 
 <img src="assets/teaser.svg" width="100%">
 
-**Table of contents**: [Setup](#setup) | [Docker Setup](#docker-setup) | [Data Guidelines](#data-guidelines) | [External Geometry Priors](#external-geometry-priors) | [Optimization](#optimization) | [Evaluation](#evaluation) | [Viewers](#interactive-viewers) | [Capture Guidelines](#capture-guidelines) | [Video Stream](#video-stream) | [SuperSplat Preview](#5-previewing-in-supersplat) | [Acknowledgments](#acknowledgments)
+**Table of contents**: [Setup](#setup) | [Model Storage](#model-storage) | [Docker Setup](#docker-setup) | [Data Guidelines](#data-guidelines) | [External Geometry Priors](#external-geometry-priors) | [Optimization](#optimization) | [Evaluation](#evaluation) | [Viewers](#interactive-viewers) | [Capture Guidelines](#capture-guidelines) | [Video Stream](#video-stream) | [SuperSplat Preview](#5-previewing-in-supersplat) | [Acknowledgments](#acknowledgments)
 
 We propose a fast, on-the-fly 3D Gaussian Splatting method that jointly estimates poses and reconstructs scenes. Through fast pose initialization, direct primitive sampling, and scalable clustering and merging, it efficiently handles diverse ordered image sequences of arbitrary length.
 
@@ -106,6 +106,51 @@ conda activate &lt;env_path&gt;/onthefly_nvs
 Where <code>&lt;pkg_path&gt;</code> is the desired package download location and <code>&lt;env_path&gt;/onthefly_nvs</code> is the desired environment location.
 </details>
 
+## Model Storage
+
+All pretrained model loading is managed by [`model_store.py`](model_store.py). By default, weights and derived JIT models are stored under `models/` in the repository root, independent of the Python process's working directory:
+
+```text
+models/
+  depth_anything_v2/
+    depth_anything_v2_vitb.pth       # Selected DEPTH_MODEL variant
+  torch/hub/
+    verlab_accelerated_features_*/  # XFeat source downloaded by Torch Hub
+    checkpoints/                   # XFeat weights and LPIPS VGG backbone
+  lpips/
+    vgg_v0.1.pth                    # LPIPS linear weights imported from its package
+  cache/
+    xfeat_<width>_<height>_<top_k>.pt
+    dense_extractor_<width>_<height>.pt
+  huggingface/                     # Shared cache for Hugging Face integrations
+```
+
+Directories and models are created on demand, not during module import. Existing files are reused. Depth downloads, imported weights, and generated JIT files are published atomically so a failed write does not replace a valid file. XFeat source/weights and the VGG backbone use Torch Hub's downloader. The first run needs network access unless all required files, including the XFeat source cache, are already available.
+
+For local Python runs, export environment variables before starting the process (`.env` is read by Compose, not by `train.py`):
+
+```bash
+export MODELS_DIR=/absolute/path/to/models  # Optional; defaults to <repository>/models
+export DEPTH_MODEL=vitb                    # vits, vitb, vitl, vitg
+python train.py -s data/my_capture -m results/my_capture
+```
+
+`MODELS_DIR` is resolved once per process and controls `TORCH_HOME`, `HF_HOME`, and Hugging Face hub cache paths used by the shared loaders. It is separate from `--model_path` / `-m`, which controls reconstructed scene output. `HF_ENDPOINT` optionally selects a mirror for depth downloads; it does not redirect GitHub's XFeat downloads.
+
+To reuse older files:
+
+- `DEPTH_MODEL_PATH=/existing/depth_anything_v2_vitb.pth` remains supported as an **import source**: it is copied into the selected model directory before loading. A missing or empty explicit source fails instead of silently downloading another model. The source file is not moved or deleted.
+- Without an explicit override, a matching depth checkpoint directly under `models/` or in the old `/cache/models/` directory is imported automatically when the new location is empty.
+- Existing repository `models/cache/` files keep their names. When changing `MODELS_DIR`, copy the old `cache/`, `torch/`, and `huggingface/` subdirectories into the new root to avoid rebuilding or downloading. A default local Torch cache is usually under `~/.cache/torch/`. Regenerate JIT caches after incompatible PyTorch/CUDA changes.
+
+Model assets are excluded from Git and the Docker build context. Geometry sidecars remain under the capture's `geometry/` directory, while scene checkpoints and PLY exports remain under `results/`. MASt3R-SLAM, VGGT, CUT3R, ARKit, and ARCore currently connect through sidecars, not through native pretrained-model loaders in this repository.
+
+Run the storage regression tests without CUDA or model downloads:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
 ## Docker Setup
 The repository includes a CUDA 12.8 Docker image and a Docker Compose service for running the web reconstruction server. The Compose setup does not require Tailscale; it exposes the required ports directly on the host:
 
@@ -133,6 +178,8 @@ Optional environment variables:
 STREAM_URL="http://<phone-ip>:<port>/video"
 DOWNSAMPLING=1.5
 DEPTH_MODEL=vitb        # vits, vitb, or vitl
+MODELS_DIR=./models    # Host path; always mounted at /app/models inside Compose
+HF_ENDPOINT=https://hf-mirror.com
 SSH_PUBLIC_KEY="$(cat ~/.ssh/id_rsa.pub)"
 ```
 
@@ -141,7 +188,21 @@ If `SSH_PUBLIC_KEY` is set, SSH is available on the host port:
 ssh -p 2222 root@<server-ip>
 ```
 
-Results are written to `./results`, and model/dependency caches are stored in Docker volumes.
+Results are written to `./results`. All model weights and model caches are stored in the host's `./models` directory (or the host path set by `MODELS_DIR`), mounted at `/app/models`. Only CuPy's compiled-kernel cache remains in a separate Docker volume; it is not a pretrained model. With plain `docker run`, mount your model directory at `/app/models` as well.
+
+When upgrading from the old `model_cache` and `depth_models` volumes, copy their contents **before recreating the old container**. For the default host directory:
+
+```bash
+container_id=$(docker compose ps -aq on-the-fly-nvs)
+mkdir -p models/depth_anything_v2 models/torch models/huggingface models/cache
+docker cp "$container_id":/cache/models/. ./models/depth_anything_v2/
+docker cp "$container_id":/cache/torch/. ./models/torch/
+docker cp "$container_id":/cache/huggingface/. ./models/huggingface/
+# If JIT caches were generated inside the old container:
+docker cp "$container_id":/app/models/cache/. ./models/cache/
+```
+
+Skip any source directories that do not exist. For a custom `MODELS_DIR`, replace `./models` in these commands with that host path. Keep the old volumes until the new container has loaded the models successfully; do not use `docker compose down -v` to migrate them.
 
 ## Data Guidelines
 > Please note that our method **is not a drop-in replacement for COLMAP + 3DGS, as it does not reorder images**. We require sequential capture that implies several constraints on the kind of data that can be handled. Please follow the **[Capture Guidelines](#capture-guidelines) for best results on your own data.**

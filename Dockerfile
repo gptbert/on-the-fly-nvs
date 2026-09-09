@@ -10,8 +10,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     XFORMERS_FORCE_DISABLE_TRITON=1 \
-    HF_HOME=/cache/huggingface \
-    TORCH_HOME=/cache/torch \
+    MODELS_DIR=/app/models \
+    HF_HOME=/app/models/huggingface \
+    TORCH_HOME=/app/models/torch \
     PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
     PIP_TRUSTED_HOST=mirrors.aliyun.com \
     CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
@@ -99,7 +100,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install submodules/graphdecoviewer
 
-RUN mkdir -p /cache/huggingface /cache/torch /app/results /app/data /cache/models
+RUN mkdir -p /app/models /app/results /app/data
 
 RUN mkdir -p /run/sshd /root/.ssh && \
     chmod 700 /root/.ssh && \

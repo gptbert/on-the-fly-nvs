@@ -13,7 +13,6 @@ import argparse
 import subprocess
 import os
 import sys
-import lpips
 import torch
 import cv2
 from tqdm import tqdm
@@ -21,6 +20,7 @@ import json
 from fused_ssim import fused_ssim
 
 sys.path.append(".")
+from model_store import get_model_store
 from utils import get_image_names, parse_time, psnr
 
 if __name__ == "__main__":
@@ -80,7 +80,7 @@ if __name__ == "__main__":
             )
 
     print("Computing metrics")
-    lpips = lpips.LPIPS(net="vgg").cuda()
+    lpips_metric = None if args.skip_rerun_metrics else get_model_store().load_lpips().cuda()
     metrics_list = []
     finetuning_epochs = [""] + args.save_at_finetune_epoch
     for epoch_id, finetuning_epoch in enumerate(finetuning_epochs):
@@ -140,7 +140,7 @@ if __name__ == "__main__":
 
                     PSNR += psnr(image[mask], gt_image[mask])
                     SSIM += fused_ssim(image[None], gt_image[None], train=False).item()
-                    LPIPS += lpips(image, gt_image).item()
+                    LPIPS += lpips_metric(image, gt_image).item()
 
                 PSNR, SSIM, LPIPS = (
                     PSNR / len(image_names),
