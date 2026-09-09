@@ -40,11 +40,20 @@ def get_args():
     parser.add_argument('--use_colmap_poses', action='store_true',
                         help="Load COLMAP data for pose and intrinsics initialization")
     parser.add_argument('--geometry_provider',
-                        choices=['default', 'external', 'arkit', 'arcore', 'mast3r', 'mast3r_slam', 'vggt', 'cut3r'],
-                        default='default',
-                        help="Geometry source for pose/depth/pointmap priors. Non-default providers read geometry_* entries from dataset info and fall back to the default provider when absent.")
+                        choices=['r3', 'default', 'external', 'arkit', 'arcore', 'mast3r', 'mast3r_slam', 'vggt', 'cut3r'],
+                        default='r3',
+                        help="r3: native streaming pose/depth; default: legacy BA + Depth Anything V2; other providers: external geometry sidecars.")
     parser.add_argument('--geometry_dir', type=str, default='geometry',
                         help="Optional source_path/geometry_dir containing per-image geometry sidecars for external providers.")
+    parser.add_argument('--r3_checkpoint', choices=['r3', 'r3_long'], default='r3')
+    parser.add_argument('--r3_resolution', type=int, default=504,
+                        help="R3 longest input edge, rounded to a multiple of 14")
+    parser.add_argument('--r3_recent_frames', type=int, default=3)
+    parser.add_argument('--r3_bank_size', type=int, default=8,
+                        help="Maximum R3 bank keyframes, in addition to recent frames and the first anchor")
+    parser.add_argument('--r3_min_confidence', type=float, default=1.02,
+                        help="R3 depth confidence threshold (exp(logit)+1, not a probability)")
+    parser.add_argument('--r3_min_pose_confidence', type=float, default=1.0)
         
     ## Learning Rates
     parser.add_argument('--lr_poses', type=float, default=1e-4, help="Pose learning rate")
@@ -116,8 +125,8 @@ def get_args():
                         help="Size of the overlapping regions when blending between anchors")
 
     ## Keyframe management
-    parser.add_argument('--max_active_keyframes', type=int, default=200,
-                        help="Maximum number of keyframes to keep in GPU memory. Will start offloading keyframes to CPU if this number is exceeded.")
+    parser.add_argument('--max_active_keyframes', type=int, default=None,
+                        help="Maximum GPU keyframes before CPU offload: 40 for R3, 200 for legacy providers.")
 
     ## Evaluation
     parser.add_argument('--test_hold', type=int, default=-1, 
@@ -141,6 +150,23 @@ def get_args():
                         help="Port of the viewer client, if using server viewer_mode")
 
     args = parser.parse_args()
+    if args.max_active_keyframes is None:
+        args.max_active_keyframes = 40 if args.geometry_provider == 'r3' else 200
+
+    if args.geometry_provider == 'r3':
+        if args.use_colmap_poses or args.enable_reboot:
+            parser.error('R3 does not support --use_colmap_poses or --enable_reboot; '
+                         'use --geometry_provider default for legacy initialization.')
+        if args.num_keyframes_miniba_bootstrap < 2:
+            parser.error('R3 bootstrap needs at least two keyframes.')
+        if not 112 <= args.r3_resolution <= 1008:
+            parser.error('--r3_resolution must be between 112 and 1008.')
+        if args.r3_recent_frames < 1 or args.r3_bank_size < 2:
+            parser.error('R3 needs at least one recent frame and two bank keyframes.')
+        if not 1 <= args.r3_min_confidence < float('inf'):
+            parser.error('--r3_min_confidence must be finite and at least 1.')
+        if not 0 <= args.r3_min_pose_confidence < float('inf'):
+            parser.error('--r3_min_pose_confidence must be finite and nonnegative.')
 
     ## Set the output directory if not specified
     if args.model_path == "":

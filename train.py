@@ -124,6 +124,7 @@ if __name__ == "__main__":
     last_reboot = 0
     bootstrap_keyframe_dicts = []
     bootstrap_desc_kpts = []
+    prev_frame_info = None
 
     # Dict of runtimes for each step
     runtimes = ["Load", "BAB", "tri", "BAI", "Add", "Init", "Opt", "anc"]
@@ -152,32 +153,39 @@ if __name__ == "__main__":
                 viewer.trainer_state = "finish"
                 break
         
+        image, info = dataset.getnext()
+        if geometry_provider.requires_observation:
+            scene_model.join_optimization_thread()
+        image = geometry_provider.observe(image, info, frameID)
+
         if n_keyframes == 0:
-            image, info = dataset.getnext()
+            if not geometry_provider.should_add_keyframe(info, None, min_displacement, True):
+                continue
             prev_desc_kpts = detector(image)
+            prev_frame_info = info
             bootstrap_keyframe_dicts = [{"image": image, "info": info}]
             bootstrap_desc_kpts = [prev_desc_kpts]
             n_keyframes += 1
             continue
 
-        image, info = dataset.getnext()
         desc_kpts = detector(image)
-        # Match features between the previous and current frame
-        curr_prev_matches = matcher(desc_kpts, prev_desc_kpts)
-        # Determine if we should add a keyframe based on the matches
-        dist = torch.norm(curr_prev_matches.kpts - curr_prev_matches.kpts_other, dim=-1)
-        n_matches = len(curr_prev_matches.kpts)
-        median_disp = dist.median().item() if n_matches > 0 else float("inf")
-        # Whether the camera appears to have moved away from the current reference.
-        # Too few matches (fast motion / motion blur) also means we lost enough
-        # overlap to track, as opposed to the camera simply being still.
-        camera_moved = median_disp > min_displacement or n_matches <= args.min_num_inliers
-        should_add_keyframe = (
-            median_disp > min_displacement
-            and n_matches > args.min_num_inliers
-        )
-        # Always add test frames so we estimate their poses
-        should_add_keyframe |= info["is_test"]
+        if geometry_provider.requires_observation:
+            should_add_keyframe = geometry_provider.should_add_keyframe(
+                info, prev_frame_info, min_displacement, False
+            )
+            camera_moved = should_add_keyframe or not info.get("_r3_usable", True)
+        else:
+            # The legacy providers keep their sparse matching admission rule.
+            curr_prev_matches = matcher(desc_kpts, prev_desc_kpts)
+            dist = torch.norm(curr_prev_matches.kpts - curr_prev_matches.kpts_other, dim=-1)
+            n_matches = len(curr_prev_matches.kpts)
+            median_disp = dist.median().item() if n_matches > 0 else float("inf")
+            camera_moved = median_disp > min_displacement or n_matches <= args.min_num_inliers
+            should_add_keyframe = (
+                median_disp > min_displacement and n_matches > args.min_num_inliers
+            )
+            # Always add test frames so we estimate their poses.
+            should_add_keyframe |= info["is_test"]
         increment_runtime(runtimes["Load"], start_time)
 
         if should_add_keyframe:
@@ -234,6 +242,8 @@ if __name__ == "__main__":
                     scene_model.optimization_loop(args.num_iterations)
                 increment_runtime(runtimes["Opt"], start_time)
                 last_reboot = n_keyframes
+                bootstrap_keyframe_dicts.clear()
+                bootstrap_desc_kpts.clear()
 
             ## Reboot
             if (
@@ -276,7 +286,9 @@ if __name__ == "__main__":
             if n_keyframes >= args.num_keyframes_miniba_bootstrap:
                 start_time = time.time()
                 prev_keyframes = scene_model.get_prev_keyframes(
-                    args.num_prev_keyframes_miniba_incr, True, desc_kpts
+                    args.num_prev_keyframes_miniba_incr,
+                    not geometry_provider.requires_observation,
+                    None if geometry_provider.requires_observation else desc_kpts,
                 )
                 increment_runtime(runtimes["tri"], start_time)
                 start_time = time.time()
@@ -287,7 +299,8 @@ if __name__ == "__main__":
                 increment_runtime(runtimes["BAI"], start_time)
                 start_time = time.time()
                 if Rt is not None:
-                    frame_geometry = geometry_provider.estimate_frame_geometry(image, info)
+                    frame_geometry = (geometry if geometry.has_depth() else
+                                      geometry_provider.estimate_frame_geometry(image, info))
                     frame_geometry.Rt = Rt
                     if geometry.focal is not None:
                         frame_geometry.focal = geometry.focal
@@ -371,6 +384,7 @@ if __name__ == "__main__":
             n_keyframes += 1
             if not info["is_test"]:
                 prev_desc_kpts = desc_kpts
+                prev_frame_info = info
 
             ## Intermediate evaluation
             if (
@@ -408,6 +422,10 @@ if __name__ == "__main__":
             pbar.set_postfix_str(",".join(bar_postfix), refresh=False)
 
     reconstruction_time = time.time() - reconstruction_start_time
+    scene_model.join_optimization_thread()
+    geometry_provider.close()
+    if len(scene_model.keyframes) == 0:
+        raise RuntimeError("Not enough valid, moving frames to bootstrap the reconstruction.")
 
     # Set to inference mode so that the model can be rendered properly
     scene_model.enable_inference_mode()

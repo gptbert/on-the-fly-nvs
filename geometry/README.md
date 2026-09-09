@@ -8,8 +8,9 @@ ${SOURCE_PATH}/${GEOMETRY_DIR}/${IMAGE_STEM}.pt
 ${SOURCE_PATH}/${GEOMETRY_DIR}/${IMAGE_STEM}.json
 ```
 
-`GEOMETRY_DIR` defaults to `geometry` and is used when `--geometry_provider` is not
-`default`.
+`GEOMETRY_DIR` defaults to `geometry` and is used only by the external sidecar
+providers, not `r3` or `default`. The native `r3` default uses live inference;
+see [Native R3 Geometry](../README.md#native-r3-geometry).
 
 Supported fields:
 

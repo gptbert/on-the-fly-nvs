@@ -21,7 +21,10 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pylint
-    - name: Test model storage without GPU or downloads
+        pip install "numpy<2" torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        pip install -r requirements-r3.txt
+        pip install --no-deps -r requirements-r3-source.txt
+    - name: Test model storage and geometry adapters without CUDA or model downloads
       run: python -m unittest discover -s tests -v
     - name: Analysing the code with pylint
       run: |

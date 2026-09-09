@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from functools import lru_cache
+import hashlib
 from importlib.resources import as_file, files
 import os
 from pathlib import Path
@@ -13,6 +14,11 @@ from urllib.request import urlretrieve
 PROJECT_ROOT = Path(__file__).resolve().parent
 LEGACY_DEPTH_DIR = Path("/cache/models")
 DEPTH_VARIANTS = {"vits": "Small", "vitb": "Base", "vitl": "Large", "vitg": "Giant"}
+R3_REVISION = "c1f2aeccfa14d035a0e7b18f188253003a8417f0"
+R3_CHECKSUMS = {
+    "r3": "887ad839eb2725c683bde55e7d378b5b3b6b629d8363a08db9a5bce60c7570e1",
+    "r3_long": "a5e14c7aa751450f8a9e2e78f1ac5e980060230af6dd0b6af86f1e6dd0859f7e",
+}
 
 
 @contextmanager
@@ -104,6 +110,72 @@ class ModelStore:
 
     def jit_path(self, filename):
         return self.directory("cache") / filename
+
+    def r3_checkpoint(self, variant="r3"):
+        """Download immutable, checksum-verified R3 weights into the shared root."""
+        if variant not in R3_CHECKSUMS:
+            raise ValueError(f"Unknown R3 checkpoint: {variant}")
+        destination = self.root / "r3" / R3_REVISION / f"{variant}.safetensors"
+
+        def verify(path):
+            with path.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            if digest != R3_CHECKSUMS[variant]:
+                raise ValueError(f"R3 checkpoint checksum mismatch: {path}")
+
+        if self._has_file(destination):
+            verify(destination)
+            return destination
+        endpoint = (os.environ.get("HF_ENDPOINT") or "https://huggingface.co").rstrip("/")
+        url = f"{endpoint}/KevinXu02/R3/resolve/{R3_REVISION}/{destination.name}"
+        print(f"Downloading R3 ({variant}, CC BY-NC 4.0) to {destination}")
+        with _atomic_destination(destination) as temporary:
+            urlretrieve(url, temporary)
+            verify(temporary)
+        return destination
+
+    def load_r3(self, variant="r3", recent_frames=3, bank_size=8, device="cuda"):
+        if recent_frames < 1 or bank_size < 2:
+            raise ValueError("R3 needs at least one recent frame and two bank keyframes.")
+        self.configure_caches()
+        try:
+            from R3.models.r3 import R3
+            from omegaconf import OmegaConf
+            from safetensors.torch import load_file
+        except ImportError as error:
+            raise RuntimeError(
+                "R3 inference dependencies are missing. Install requirements-r3.txt "
+                "and the pinned source in requirements-r3-source.txt with --no-deps."
+            ) from error
+
+        checkpoint = self.r3_checkpoint(variant)
+        with as_file(files("R3").joinpath("configs", "r3-large.yaml")) as config:
+            model = R3(
+                da3_cfg=OmegaConf.load(config), online_mode=True,
+                online_kv_cache_mode="dynamic", online_kv_backend="dense",
+                online_recent_frames=recent_frames, bank_initial_frames=1,
+                keyframe_max_keyframes=bank_size, keyframe_interval=10,
+                online_verbose=False, online_fallback_enabled=False,
+                online_finalize_pose_reconstruction=False, metric_scale_enabled=False,
+                disable_segment_pgo=True, max_segment_frames=0,
+            )
+        # Load on CPU first, so weight loading does not double peak CUDA allocation.
+        state = load_file(str(checkpoint), device="cpu")
+        expected = model.state_dict()
+        normalized = {}
+        for key, value in state.items():
+            if key in {"train_total_images", "train_total_samples", "epoch_fraction"}:
+                continue
+            for prefix in ("module.", "net."):
+                key = key.removeprefix(prefix)
+            if key.startswith("model."):
+                key = "da3." + key.removeprefix("model.")
+            if key not in expected and "da3." + key in expected:
+                key = "da3." + key
+            normalized[key] = value
+        model.load_state_dict(normalized, strict=True)
+        del state, normalized, expected
+        return model.eval().requires_grad_(False).to(device)
 
     def save_jit(self, model, filename):
         import torch

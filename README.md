@@ -13,6 +13,8 @@
 
 We propose a fast, on-the-fly 3D Gaussian Splatting method that jointly estimates poses and reconstructs scenes. Through fast pose initialization, direct primitive sampling, and scalable clustering and merging, it efficiently handles diverse ordered image sequences of arbitrary length.
 
+**This fork now defaults to native [R3](https://github.com/KevinXu02/R3) streaming geometry.** The phone still captures RGB; the CUDA server predicts poses and depth, then the existing `SceneModel` optimizes 3D Gaussians. XFeat remains available to the existing feature consumers. The original BA + Depth Anything V2 frontend is retained as `--geometry_provider default`. See [Native R3 Geometry](#native-r3-geometry) for setup and limitations.
+
 <!-- Institutions logos -->
 <div align="center">
   <a href="https://www.inria.fr/">
@@ -56,11 +58,11 @@ If you find this code useful in a publication, please use the following citation
 ```
 
 ## Setup 
-Tested on Ubuntu 22.04 and Windows 11 with PyTorch 2.7.0, and CUDA 11.8 and 12.8.
+The original frontend was tested on Ubuntu 22.04 and Windows 11 with PyTorch 2.7.0, and CUDA 11.8 and 12.8. The new R3 path targets Python 3.12, CUDA 12.8, and PyTorch >=2.5; its adapter has CPU regression coverage, but full CUDA reconstruction and Docker build validation are still required.
 <br>
 Create the environment:
 ```bash
-git clone --recursive https://github.com/graphdeco-inria/on-the-fly-nvs.git
+git clone --recursive https://github.com/gptbert/on-the-fly-nvs.git
 cd on-the-fly-nvs
 conda create -n onthefly_nvs python=3.12 -y
 conda activate onthefly_nvs
@@ -76,10 +78,12 @@ $env:DISTUTILS_USE_SDK=1 # (If you use PowerShell)
 pip install torch torchvision xformers --index-url https://download.pytorch.org/whl/cu128
 pip install cupy-cuda12x
 pip install -r requirements.txt
+pip install --no-deps -r requirements-r3-source.txt
 ```
 
 <details>
 <summary>Setup with CUDA 11.8</summary>
+Use <code>--geometry_provider default</code> for the legacy configuration below. The R3 integration is intended for the CUDA 12.8 setup above.
 Note that <code>xformers</code> will not be installed with CUDA 11.8 because it requires a version of PyTorch that is incompatible with our codebase.
 <pre><code>pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 pip install cupy-cuda11x
@@ -112,8 +116,11 @@ All pretrained model loading is managed by [`model_store.py`](model_store.py). B
 
 ```text
 models/
+  r3/<pinned-revision>/
+    r3.safetensors                 # Default native geometry model
+    r3_long.safetensors            # Optional; only downloaded when selected
   depth_anything_v2/
-    depth_anything_v2_vitb.pth       # Selected DEPTH_MODEL variant
+    depth_anything_v2_vitb.pth       # Legacy provider only
   torch/hub/
     verlab_accelerated_features_*/  # XFeat source downloaded by Torch Hub
     checkpoints/                   # XFeat weights and LPIPS VGG backbone
@@ -125,13 +132,12 @@ models/
   huggingface/                     # Shared cache for Hugging Face integrations
 ```
 
-Directories and models are created on demand, not during module import. Existing files are reused. Depth downloads, imported weights, and generated JIT files are published atomically so a failed write does not replace a valid file. XFeat source/weights and the VGG backbone use Torch Hub's downloader. The first run needs network access unless all required files, including the XFeat source cache, are already available.
+Directories and models are created on demand, not during module import. Existing files are reused. Depth downloads, imported weights, and generated JIT files are published atomically so a failed write does not replace a valid file. R3 weights use a pinned Hugging Face revision and SHA-256 verification, including cached files; each checkpoint is about 1.49 GB. XFeat source/weights and the VGG backbone use Torch Hub's downloader. LPIPS/VGG loads only when requested evaluation has test views. The first run needs network access unless all required files, including the XFeat source cache, are already available.
 
 For local Python runs, export environment variables before starting the process (`.env` is read by Compose, not by `train.py`):
 
 ```bash
 export MODELS_DIR=/absolute/path/to/models  # Optional; defaults to <repository>/models
-export DEPTH_MODEL=vitb                    # vits, vitb, vitl, vitg
 python train.py -s data/my_capture -m results/my_capture
 ```
 
@@ -145,7 +151,7 @@ To reuse older files:
 
 Model assets are excluded from Git and the Docker build context. Geometry sidecars remain under the capture's `geometry/` directory, while scene checkpoints and PLY exports remain under `results/`. MASt3R-SLAM, VGGT, CUT3R, ARKit, and ARCore currently connect through sidecars, not through native pretrained-model loaders in this repository.
 
-Run the storage regression tests without CUDA or model downloads:
+Run the CPU regression tests without CUDA or pretrained-model downloads (PyTorch is required; the real upstream API smoke test also requires the pinned R3 package):
 
 ```bash
 python -m unittest discover -s tests -v
@@ -177,7 +183,12 @@ Optional environment variables:
 ```bash
 STREAM_URL="http://<phone-ip>:<port>/video"
 DOWNSAMPLING=1.5
-DEPTH_MODEL=vitb        # vits, vitb, or vitl
+GEOMETRY_PROVIDER=r3
+R3_CHECKPOINT=r3       # r3_long is optional, not a long-sequence reset preset
+R3_RESOLUTION=504      # Reduce to 392 if memory is tight
+R3_BANK_SIZE=8
+MAX_ACTIVE_KEYFRAMES=40
+DEPTH_MODEL=vitb       # Only used with GEOMETRY_PROVIDER=default
 MODELS_DIR=./models    # Host path; always mounted at /app/models inside Compose
 HF_ENDPOINT=https://hf-mirror.com
 SSH_PUBLIC_KEY="$(cat ~/.ssh/id_rsa.pub)"
@@ -221,8 +232,58 @@ python scripts/download_datasets.py --out_dir data/ --datasets MipNeRF360 # or T
 
 For best results, we recommend using a high-quality camera and providing still photographs to the method. We provide an experimental prototype for reconstruction from a [Video Stream](#video-stream) that will not provide the same level of quality.
 
+## Native R3 Geometry
+
+```text
+Phone RGB stream / ordered captured images
+  -> R3GeometryProvider (one observation per received frame)
+  -> pose + depth + confidence + camera-space pointmap
+  -> fixed-camera rectification and geometry-aware keyframe selection
+  -> SceneModel: Gaussian initialization, pose refinement, 3DGS optimization
+```
+
+The default command now runs R3 without sidecars:
+
+```bash
+python train.py -s data/my_capture -m results/my_capture --viewer_mode web
+```
+
+Native installation needs **both** `requirements-r3.txt` (also included by `requirements.txt`) and `pip install --no-deps -r requirements-r3-source.txt`. The latter pins upstream code to `e345f1112fbc9c451d44c9c5aa22d9bfec2a954d`, including its bundled DA3 implementation. Do not install the standalone `depth-anything-3` package into the same environment: its namespace overlaps the bundled version. Docker installs both automatically. Rebuild existing images after this upgrade:
+
+```bash
+docker compose up --build
+```
+
+Default resource settings are a 504-pixel longest input edge, 3 recent frames, 8 bank keyframes plus the first anchor, and 40 active 3DGS keyframes. The bank must contain at least 2 keyframes because the pinned upstream eviction policy does not enforce a single-slot bank. These are bounded frontend settings, **not a measured 16/24 GB memory guarantee**. Gaussian state and image resolution also affect memory. A smaller configuration is:
+
+```bash
+python train.py -s data/my_capture -m results/my_capture \
+  --r3_resolution 392 --r3_bank_size 4 --r3_recent_frames 2 \
+  --max_active_keyframes 24 --downsampling 2
+```
+
+Important behavior:
+
+- Every received frame advances R3 once, before keyframe admission. Bootstrap and incremental initialization reuse cached predictions. Frames skipped by the stream loader are not inferred retroactively.
+- R3 uses OpenCV world-to-camera poses and positive camera Z-depth in a shared **relative, non-metric scale**. Depth and pointmaps are not independently affine-aligned or optimized with per-frame depth scale/offset. Scene pose and Gaussian optimization remain enabled.
+- RGB, depth, and masks are rectified together into the renderer's centered single-focal camera. The first prediction selects a fixed virtual focal; `--init_focal` or `--init_fov` can override it. Full predicted intrinsics, including unequal focal axes, enter the warp. Exported training views use this rectified camera, not the original phone calibration.
+- Finite depth above `--r3_min_confidence 1.02` produces a binary validity mask; this model score is `exp(logit)+1`, not a probability. Pose admission also uses `--r3_min_pose_confidence 1.0` and at least 10% valid pixels. These thresholds need validation on real captures.
+- R3 and Gaussian optimization run serially on the GPU; between observations, live Gaussian updates can continue asynchronously. KV state and bank size are bounded, and offline diagnostic history is pruned. Retained keyframe geometry follows the scene's CPU offloading.
+- Low-confidence frames are skipped. Missing dependencies, corrupt weights, invalid cameras, or OOM fail explicitly; there is no silent fallback into a different scale. `--use_colmap_poses` and legacy `--enable_reboot` are rejected in R3 mode.
+- Automatic re-anchoring, retroactive pose-graph rewrites, and the extra metric-depth model are disabled. The latest optimized reference pose supplies a rigid correction to incoming poses. Long paths can still drift; `--r3_checkpoint r3_long` changes weights only and does not implement loop closure or recovery.
+
+To run the original frontend explicitly:
+
+```bash
+DEPTH_MODEL=vitb python train.py -s data/my_capture -m results/legacy \
+  --geometry_provider default
+# Docker equivalent: GEOMETRY_PROVIDER=default docker compose up
+```
+
+R3 weights are **CC BY-NC 4.0**, not unrestricted commercial weights. See the [model card](https://huggingface.co/KevinXu02/R3) and the [2026 selection study](docs/model-selection-2026.md). No end-to-end quality, FPS, or VRAM improvement is claimed before a saved-phone-sequence comparison on the target GPU.
+
 ## External Geometry Priors
-The default pipeline still performs on-the-fly pose initialization, depth estimation, Gaussian initialization, and joint optimization internally. For newer mobile-capture workflows, the recommended extension path is to use a separate geometry provider for stronger pose, depth, and pointmap priors, while keeping this repository's `SceneModel` responsible for 3D Gaussian optimization.
+Alongside the native R3 default, the sidecar adapter accepts external pose, depth, and pointmap priors while keeping `SceneModel` responsible for 3D Gaussian optimization.
 
 This is useful when preprocessing phone videos or image sequences with external geometry frontends such as MASt3R-SLAM, VGGT, CUT3R, ARKit, ARCore, or another system that can export camera poses, depth maps, confidence maps, or pointmaps. External priors are optional per frame: if a sidecar omits a field, the trainer falls back to the default internal path for that field.
 
@@ -303,7 +364,7 @@ python train.py -s data/MipNeRF360/garden -m results/MipNeRF360/garden
   #### --use_colmap_poses
   Load COLMAP data for pose and intrinsics initialization.
   #### --geometry_provider
-  Geometry source for pose/depth/pointmap priors. Use `default` for the original internal pipeline, or `external` for per-frame sidecars. Aliases such as `arkit`, `arcore`, `mast3r`, `mast3r_slam`, `vggt`, and `cut3r` currently use the same sidecar adapter.
+  Geometry source for pose/depth/pointmap priors. `r3` is the native streaming default. Use `default` for the original BA + Depth Anything V2 pipeline, or `external` for per-frame sidecars. Aliases such as `arkit`, `arcore`, `mast3r`, `mast3r_slam`, `vggt`, and `cut3r` currently use the same sidecar adapter.
   #### --geometry_dir
   Optional sidecar directory under `source_path`, `geometry` by default.
   #### --test_hold

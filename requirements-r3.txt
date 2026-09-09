@@ -1,0 +1,9 @@
+# Inference only. Install CUDA PyTorch >=2.5 and torchvision first.
+numpy>=1.26,<2
+addict>=2.4,<3
+einops>=0.7,<1
+omegaconf>=2.3,<3
+safetensors>=0.4.5,<1
+huggingface-hub>=0.26,<2
+# NumPy 1.x-compatible OpenCV, also used by the existing stream loader.
+opencv-python>=4.8,<4.12

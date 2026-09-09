@@ -46,6 +46,9 @@ class Keyframe:
         geometry: GeometryFrame | None = None,
         inference_mode: bool = False,
     ):
+        self.geometry_scale_consistent = bool(
+            geometry is not None and geometry.metadata.get("scale_consistent", False)
+        )
         self.image_pyr = [image]
         if not inference_mode: # Only extract depth and feature maps in training mode
             self.feat_map = feat_extractor(image)
@@ -90,6 +93,8 @@ class Keyframe:
 
         self.latest_invdepth = None
         self.desc_kpts = desc_kpts
+        # CPU priors are no longer needed once copied into the keyframe tensors.
+        info.pop("_r3_geometry", None)
         self.info = info
         self.is_test = info["is_test"]
 
@@ -98,8 +103,10 @@ class Keyframe:
         self.tW2C = torch.nn.Parameter(Rt[:3, 3].clone())
         exposure = torch.eye(3, 4, device="cuda")
         self.exposure = torch.nn.Parameter(exposure)
-        self.depth_scale = torch.nn.Parameter(torch.ones(1, device="cuda"))
-        self.depth_offset = torch.nn.Parameter(torch.zeros(1, device="cuda"))
+        self.depth_scale = torch.nn.Parameter(torch.ones(1, device="cuda"),
+                                              requires_grad=not self.geometry_scale_consistent)
+        self.depth_offset = torch.nn.Parameter(torch.zeros(1, device="cuda"),
+                                               requires_grad=not self.geometry_scale_consistent)
 
         # Optimizer
         if not inference_mode: # Only create optimizer in training mode
@@ -134,6 +141,7 @@ class Keyframe:
         if not only_train:
             self.feat_map = self.feat_map.to(device)
             self.mono_idepth = self.mono_idepth.to(device)
+            self.mono_depth_conf = self.mono_depth_conf.to(device)
             if self.latest_invdepth is not None:
                 self.latest_invdepth = self.latest_invdepth.to(device)
             if self.geometry_pointmap is not None:
@@ -176,6 +184,16 @@ class Keyframe:
         if unload_desc_kpts:
             self.desc_kpts.to("cuda")
 
+        if self.geometry_scale_consistent:
+            # R3 supplies 3D points even when sparse triangulation has no matches.
+            points, depth, valid = self.sample_geometry_pointmap(self.desc_kpts.kpts)
+            confidence = self.sample_conf(self.desc_kpts.kpts)
+            valid &= confidence > 0.5
+            self.desc_kpts.update_3D_pts(points[valid], depth[valid], confidence[valid], valid)
+            if unload_desc_kpts:
+                self.desc_kpts.to("cpu")
+            return
+
         ## Update 3D points using the latest rendered depth
         if self.latest_invdepth is not None:
             uv = self.desc_kpts.kpts
@@ -193,7 +211,7 @@ class Keyframe:
                 align_corners=True,
             )[0, 0, 0]
             mono_conf = F.grid_sample(
-                self.mono_depth_conf, sampler, mode="bilinear", align_corners=True
+                self.mono_depth_conf.cuda(), sampler, mode="bilinear", align_corners=True
             )[0, 0, 0]
             mono_model_diff = (model_idepth - mono_idepth) ** 2
             var = 0.2
@@ -246,7 +264,7 @@ class Keyframe:
         Align the mono depth to the triangulated depth of the keypoints.
         update_3dpts must have been called before this function.
         """
-        if (self.desc_kpts.pts_conf > 0).any():
+        if not self.geometry_scale_consistent and (self.desc_kpts.pts_conf > 0).any():
             self.mono_idepth = align_depth(
                 self.mono_idepth, self.desc_kpts, self.width, self.height
             )
@@ -266,7 +284,7 @@ class Keyframe:
     @torch.no_grad()
     def sample_conf(self, uv):
         return sample(
-            self.mono_depth_conf, uv.view(1, 1, -1, 2), self.width, self.height
+            self.mono_depth_conf.to(uv.device), uv.view(1, 1, -1, 2), self.width, self.height
         )[0, 0, 0]
 
     def _prepare_geometry_pointmap(self, pointmap: torch.Tensor):
@@ -292,7 +310,7 @@ class Keyframe:
         if self.geometry_pointmap is None:
             return None, None, None
         sampled_pts = sample(
-            self.geometry_pointmap[None], uv.view(1, 1, -1, 2), self.width, self.height
+            self.geometry_pointmap[None].to(uv.device), uv.view(1, 1, -1, 2), self.width, self.height
         )[0, :, 0].T
         valid = torch.isfinite(sampled_pts).all(dim=-1)
         valid &= torch.linalg.vector_norm(sampled_pts, dim=-1) > 1e-6

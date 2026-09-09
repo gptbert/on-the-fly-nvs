@@ -10,7 +10,7 @@ services:
       - "0.0.0.0:6009:6009"
       - "0.0.0.0:8000:8000"
     environment:
-      - CUDA_VISIBLE_DEVICES=1
+      - CUDA_VISIBLE_DEVICES=0
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
       - STREAM_URL=${STREAM_URL:-}
@@ -18,7 +18,12 @@ services:
       - MODELS_DIR=/app/models
       - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
       - CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
-      # Depth model: vits (fastest), vitb (balanced), vitl (best quality)
+      - GEOMETRY_PROVIDER=${GEOMETRY_PROVIDER:-r3}
+      - R3_CHECKPOINT=${R3_CHECKPOINT:-r3}
+      - R3_RESOLUTION=${R3_RESOLUTION:-504}
+      - R3_BANK_SIZE=${R3_BANK_SIZE:-8}
+      - MAX_ACTIVE_KEYFRAMES=${MAX_ACTIVE_KEYFRAMES:-40}
+      # Used only with GEOMETRY_PROVIDER=default (legacy frontend).
       - DEPTH_MODEL=${DEPTH_MODEL:-vitb}
       # Downsampling factor: higher = smaller image = faster (1.5 default, try 2.0 or 3.0)
       - DOWNSAMPLING=${DOWNSAMPLING:-1.5}

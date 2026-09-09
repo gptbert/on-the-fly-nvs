@@ -79,13 +79,8 @@ class SceneModel:
         self.anchor_overlap = args.anchor_overlap
         self.optimization_thread = None
 
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.lpips = get_model_store().load_lpips().cuda()
-        except Exception as error:
-            self.lpips = None
-            warnings.warn(f"LPIPS unavailable: {error}", RuntimeWarning)
+        self.lpips = None
+        self.lpips_load_attempted = False
 
         if not inference_mode:
             self.num_prev_keyframes_check = args.num_prev_keyframes_check
@@ -372,6 +367,14 @@ class SceneModel:
 
     @torch.no_grad()
     def evaluate(self, eval_poses=False, with_LPIPS=False, all=False):
+        self.join_optimization_thread()
+        if with_LPIPS and not self.lpips_load_attempted and any(kf.is_test for kf in self.keyframes):
+            self.lpips_load_attempted = True
+            try:
+                self.lpips = get_model_store().load_lpips().cuda()
+            except Exception as error:
+                warnings.warn(f"LPIPS unavailable: {error}", RuntimeWarning)
+        with_LPIPS = with_LPIPS and self.lpips is not None
         # Make sure test keyframes have similar exposure matrices compared to their neighbors
         self.harmonize_test_exposure()
 

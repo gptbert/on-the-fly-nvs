@@ -85,7 +85,7 @@ class ImageDataset:
         self.load_colmap_data(os.path.join(args.source_path, "sparse/0"))
         self.geometry_dir = (
             os.path.join(args.source_path, args.geometry_dir)
-            if args.geometry_provider != "default" and args.geometry_dir
+            if args.geometry_provider not in {"default", "r3"} and args.geometry_dir
             else None
         )
         if self.geometry_dir:

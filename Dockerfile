@@ -75,6 +75,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY . .
 
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements-r3.txt && \
+    pip install --no-deps -r requirements-r3-source.txt
+
 RUN git config --global --add safe.directory /app && \
     if [ ! -f submodules/fused-ssim/setup.py ]; then \
         git clone https://github.com/rahul-goel/fused-ssim submodules/fused-ssim && \
@@ -90,7 +94,7 @@ RUN git config --global --add safe.directory /app && \
     fi
 
 ENV MAX_JOBS=4 \
-    TORCH_CUDA_ARCH_LIST="8.6"
+    TORCH_CUDA_ARCH_LIST="8.6;8.9"
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-build-isolation submodules/diff-gaussian-rasterization
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -116,6 +120,11 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 22 6009 8000
 
 ENV STREAM_URL="" \
+    GEOMETRY_PROVIDER="r3" \
+    R3_CHECKPOINT="r3" \
+    R3_RESOLUTION="504" \
+    R3_BANK_SIZE="8" \
+    MAX_ACTIVE_KEYFRAMES="40" \
     DEPTH_MODEL="vitb" \
     DOWNSAMPLING="1.5"
 
@@ -124,5 +133,10 @@ CMD ["sh", "-c", \
     "python train.py \
         -s ${STREAM_URL} \
         --downsampling ${DOWNSAMPLING} \
+        --geometry_provider ${GEOMETRY_PROVIDER} \
+        --r3_checkpoint ${R3_CHECKPOINT} \
+        --r3_resolution ${R3_RESOLUTION} \
+        --r3_bank_size ${R3_BANK_SIZE} \
+        --max_active_keyframes ${MAX_ACTIVE_KEYFRAMES} \
         --viewer_mode web \
         -m /app/results/$(date +%Y%m%d_%H%M%S)"]

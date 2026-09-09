@@ -1,6 +1,7 @@
 """Model storage tests: no GPU, third-party packages, or network required."""
 
 from contextlib import chdir
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from model_store import DEPTH_VARIANTS, PROJECT_ROOT, ModelStore, get_model_store
+from model_store import DEPTH_VARIANTS, PROJECT_ROOT, R3_REVISION, ModelStore, get_model_store
 
 
 class ModelStoreTests(unittest.TestCase):
@@ -91,6 +92,69 @@ class ModelStoreTests(unittest.TestCase):
         path = self.write(self.depth_path())
         self.assertEqual(self.store.depth_checkpoint("vitb"), path)
         self.download.assert_not_called()
+
+    def test_r3_pinned_download_is_atomic_verified_and_reused(self):
+        payload = b"test r3 weights"
+        digest = hashlib.sha256(payload).hexdigest()
+        os.environ['HF_ENDPOINT'] = 'https://models.example.test/'
+        self.download.side_effect = lambda _url, path: path.write_bytes(payload)
+        with patch.dict('model_store.R3_CHECKSUMS', {'r3': digest}):
+            path = self.store.r3_checkpoint()
+            self.assertEqual(path, self.store.root / 'r3' / R3_REVISION / 'r3.safetensors')
+            self.assertEqual(self.download.call_args.args[0],
+                             f'https://models.example.test/KevinXu02/R3/resolve/{R3_REVISION}/r3.safetensors')
+            self.assertEqual(self.store.r3_checkpoint(), path)
+            self.assertEqual(self.download.call_count, 1)
+            self.assertEqual(list(path.parent.glob('.*')), [])
+
+    def test_r3_bad_download_is_not_published(self):
+        self.download.side_effect = lambda _url, path: path.write_bytes(b'corrupt')
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            self.store.r3_checkpoint()
+        self.assertEqual(list((self.store.root / 'r3' / R3_REVISION).iterdir()), [])
+
+    def test_r3_corrupt_existing_checkpoint_is_preserved_and_reported(self):
+        path = self.write(self.store.root / 'r3' / R3_REVISION / 'r3.safetensors', b'corrupt')
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            self.store.r3_checkpoint()
+        self.assertEqual(path.read_bytes(), b'corrupt')
+        self.download.assert_not_called()
+
+    def test_r3_unknown_variant_does_not_download(self):
+        with self.assertRaisesRegex(ValueError, 'Unknown R3'):
+            self.store.r3_checkpoint('../unknown')
+        self.download.assert_not_called()
+
+    def test_r3_loader_uses_bounded_inference_and_strict_cpu_weights(self):
+        config_path = self.write(self.base / 'package' / 'configs' / 'r3-large.yaml')
+        checkpoint = self.write(self.base / 'r3.safetensors')
+        model = Mock()
+        model.state_dict.return_value = {'da3.weight': 'expected'}
+        model.eval.return_value = model
+        model.requires_grad_.return_value = model
+        model.to.return_value = model
+        constructor = Mock(return_value=model)
+        load_file = Mock(return_value={'net.da3.weight': 'loaded',
+                                       'train_total_images': 1, 'train_total_samples': 2,
+                                       'epoch_fraction': 0.5})
+        packages = {'R3': SimpleNamespace(), 'R3.models': SimpleNamespace(),
+                    'R3.models.r3': SimpleNamespace(R3=constructor),
+                    'omegaconf': SimpleNamespace(OmegaConf=SimpleNamespace(load=Mock(return_value={}))),
+                    'safetensors': SimpleNamespace(),
+                    'safetensors.torch': SimpleNamespace(load_file=load_file)}
+        with patch.dict(sys.modules, packages), \
+             patch('model_store.files', return_value=config_path.parent.parent), \
+             patch.object(self.store, 'r3_checkpoint', return_value=checkpoint):
+            self.assertIs(self.store.load_r3(recent_frames=3, bank_size=8), model)
+        kwargs = constructor.call_args.kwargs
+        self.assertEqual(kwargs['online_kv_cache_mode'], 'dynamic')
+        self.assertEqual(kwargs['keyframe_max_keyframes'], 8)
+        self.assertEqual(kwargs['online_recent_frames'], 3)
+        self.assertFalse(kwargs['metric_scale_enabled'])
+        self.assertFalse(kwargs['online_fallback_enabled'])
+        model.load_state_dict.assert_called_once_with({'da3.weight': 'loaded'}, strict=True)
+        load_file.assert_called_once_with(str(checkpoint), device='cpu')
+        model.to.assert_called_once_with('cuda')
 
     def test_unknown_encoder_fails_without_download(self):
         with self.assertRaisesRegex(ValueError, "Unknown DEPTH_MODEL"):

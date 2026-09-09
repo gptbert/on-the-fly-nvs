@@ -1,0 +1,2 @@
+# Install separately with --no-deps: upstream's default dependencies include training.
+R3 @ git+https://github.com/KevinXu02/R3.git@e345f1112fbc9c451d44c9c5aa22d9bfec2a954d

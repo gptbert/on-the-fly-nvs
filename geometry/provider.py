@@ -54,6 +54,18 @@ class GeometryProvider:
     point maps, or tracks.
     """
 
+    requires_observation = False
+
+    def observe(self, image, info, frame_id):
+        """Process each input once, before feature-based keyframe selection."""
+        return image
+
+    def should_add_keyframe(self, info, reference_info, min_displacement, fallback):
+        return fallback
+
+    def close(self):
+        """Release frontend resources before scene export or fine-tuning."""
+
     def __call__(self, image: torch.Tensor, info: dict | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         geometry = self.estimate_frame_geometry(image, info or {})
         if not geometry.has_depth():
@@ -257,6 +269,10 @@ def make_geometry_provider(
     max_pnp_error: float,
     args,
 ) -> GeometryProvider:
+    if name == "r3":
+        from geometry.r3_provider import R3GeometryProvider
+
+        return R3GeometryProvider(width, height, args)
     if name == "default":
         return DefaultGeometryProvider(width, height, triangulator, matcher, max_pnp_error, args)
     if name in {"external", "arkit", "arcore", "mast3r", "mast3r_slam", "vggt", "cut3r"}:
