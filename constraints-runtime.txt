@@ -1,0 +1,9 @@
+# R3's pinned upstream requires NumPy 1.x. Keep compiled consumers on that ABI.
+numpy>=1.26,<2
+cupy-cuda12x>=13.3,<14
+scipy>=1.13,<1.17
+plyfile>=1.0,<1.1.4
+opencv-python>=4.8,<4.12
+# CUDA 12 containers must not resolve the CUDA 13 driver bindings.
+cuda-python>=12.9.4,<13
+cuda-bindings>=12.9.4,<13

@@ -1,3 +1,4 @@
+-c constraints-runtime.txt
 plyfile
 tqdm
 opencv-python

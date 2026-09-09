@@ -152,6 +152,9 @@ def get_args():
     args = parser.parse_args()
     if args.max_active_keyframes is None:
         args.max_active_keyframes = 40 if args.geometry_provider == 'r3' else 200
+    # Anchor transitions retain 20 recent frames, plus one slot for cache swaps.
+    if args.max_active_keyframes < 21:
+        parser.error('--max_active_keyframes must be at least 21 for anchor retention and CPU offload.')
 
     if args.geometry_provider == 'r3':
         if args.use_colmap_poses or args.enable_reboot:

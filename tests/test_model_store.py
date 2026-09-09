@@ -289,10 +289,12 @@ class ModelStoreTests(unittest.TestCase):
         self.torch.hub.load.side_effect = load
         detector_model = self.store.load_xfeat(top_k=1024)
         self.torch.hub.load.assert_called_with(
-            "verlab/accelerated_features", "XFeat", pretrained=True, top_k=1024)
+            "verlab/accelerated_features", "XFeat", pretrained=True, top_k=1024,
+            trust_repo=True)
         dense_model = self.store.load_xfeat(top_k=4096)
         self.torch.hub.load.assert_called_with(
-            "verlab/accelerated_features", "XFeat", pretrained=True, top_k=4096)
+            "verlab/accelerated_features", "XFeat", pretrained=True, top_k=4096,
+            trust_repo=True)
         self.assertIsNot(detector_model, dense_model)
 
     def test_lpips_imports_bundled_weights_and_uses_explicit_path(self):

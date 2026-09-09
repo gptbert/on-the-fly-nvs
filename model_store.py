@@ -190,7 +190,8 @@ class ModelStore:
         import torch
 
         return torch.hub.load(
-            "verlab/accelerated_features", "XFeat", pretrained=True, top_k=top_k
+            "verlab/accelerated_features", "XFeat", pretrained=True, top_k=top_k,
+            trust_repo=True,
         )
 
     def load_lpips(self):

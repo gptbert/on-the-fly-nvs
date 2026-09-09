@@ -1,2 +1,2 @@
 # Install separately with --no-deps: upstream's default dependencies include training.
-R3 @ git+https://github.com/KevinXu02/R3.git@e345f1112fbc9c451d44c9c5aa22d9bfec2a954d
+R3 @ https://codeload.github.com/KevinXu02/R3/zip/e345f1112fbc9c451d44c9c5aa22d9bfec2a954d#sha256=db9633e313f0413b84b5803ac615d596b58c2d9b402599c727394efc136e4363

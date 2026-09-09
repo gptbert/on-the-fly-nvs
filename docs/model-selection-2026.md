@@ -2,7 +2,7 @@
 
 Research cutoff: 2026-09-09. Repository baseline: `8b377c9`.
 
-Status: native R3 integration implemented and selected as the runtime default at the user's request. The old BA + Depth Anything V2 frontend remains explicitly selectable. XFeat and LPIPS/VGG are retained. CPU adapter tests and upstream API smoke coverage are provided; full CUDA reconstruction, quality, latency, memory, and Docker validation are still pending. Only checkpoint headers were inspected locally, not the full pretrained weights.
+Status: native R3 integration implemented and selected as the runtime default at the user's request. The old BA + Depth Anything V2 frontend remains explicitly selectable. XFeat and LPIPS/VGG are retained. The full checkpoint was downloaded and SHA-256 verified; an independent Docker image passed 61 regression tests and offline CUDA reconstruction. Deployment details, capture data, and validation reports remain private. Comparative quality, long-trajectory recovery, and consumer-GPU acceptance remain open.
 
 ## Decision
 
@@ -15,13 +15,13 @@ Select **R3** as the first experimental replacement for the combined depth-estim
 
 ## Hardware And License Constraints
 
-The stated server is an "RTX 4080 24G". NVIDIA lists the standard RTX 4080 and 4080 SUPER as **16GB**. Treat 24GB as a reported capacity, not verified hardware. Confirm on the reconstruction server before selecting runtime limits. [NVIDIA specifications](https://www.nvidia.com/en-gb/geforce/graphics-cards/40-series/rtx-4080-family/)
+Inspect the actual deployment GPU and memory before selecting runtime limits. Hardware and capacity labels are not interchangeable: NVIDIA lists the standard RTX 4080 and 4080 SUPER as **16GB**. Keep server-specific inventory and connection details in private deployment records. [NVIDIA consumer specifications](https://www.nvidia.com/en-gb/geforce/graphics-cards/40-series/rtx-4080-family/)
 
 ```bash
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
 ```
 
-Plan for both 16GB and 24GB. Parameter count and checkpoint size are not peak VRAM: activations, KV caches, retained input/output tensors, Gaussians, optimizer state, and viewer buffers must all be measured together. None of the published FPS figures establishes end-to-end performance for this repository.
+Retain a separate acceptance run for the intended consumer GPU. Parameter count and checkpoint size are not peak VRAM: activations, KV caches, retained input/output tensors, Gaussians, optimizer state, and viewer buffers must all be measured together. Neither published FPS figures nor a short server test establishes consumer-GPU or long-sequence performance.
 
 R3's model card explicitly licenses its weights under **CC BY-NC 4.0**, despite the original wrapper code being Apache-2.0. The existing project's [license](../LICENSE.md) also restricts commercial use. This selection assumes research/evaluation; it is not commercial-license clearance. [R3 model card](https://huggingface.co/KevinXu02/R3)
 
@@ -85,7 +85,7 @@ Retain Python 3.12. Upstream packaging declares Python >=3.10, but that is not p
 
 ## Validation Still Required
 
-The runtime switch was requested before GPU acceptance testing. Validate the native path on a saved phone sequence before relying on a live capture. The initial integration serializes frontend inference and Gaussian updates to limit simultaneous allocation peaks.
+The runtime switch was initially requested before GPU acceptance testing. Independent Docker and short-sequence CUDA tests have since run; they do not replace the comparative and long-sequence checks below. The integration serializes frontend inference and Gaussian updates to limit simultaneous allocation peaks. Existing workbench and viewer deployments should be preserved while validating the replacement in isolation.
 
 Use the same extracted frames, held-out views, optimization iterations, resolution, and Gaussian budget across the original frontend, R3, and a bounded-window DA3/LingBot comparison. Do not compare PSNR from different datasets or copy a paper's improvement into this project.
 

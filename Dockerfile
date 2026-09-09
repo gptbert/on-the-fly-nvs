@@ -57,10 +57,17 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 WORKDIR /app
 
+COPY constraints-runtime.txt /opt/constraints-runtime.txt
+ARG PIP_PACKAGE_INDEX=https://repo.huaweicloud.com/repository/pypi/simple
+ENV PIP_CONSTRAINT=/opt/constraints-runtime.txt \
+    PIP_INDEX_URL=${PIP_PACKAGE_INDEX}
+
+# Fetch only GPU wheels from PyTorch; resolve their dependencies via PIP_INDEX_URL.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install \
-    torch torchvision xformers \
-    --index-url https://download.pytorch.org/whl/cu128
+    pip install --no-deps \
+    torch==2.11.0+cu128 torchvision==0.26.0+cu128 xformers==0.0.35 \
+    --index-url https://download.pytorch.org/whl/cu128 && \
+    pip install torch==2.11.0+cu128 torchvision==0.26.0+cu128 xformers==0.0.35
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install cupy-cuda12x

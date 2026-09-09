@@ -58,7 +58,7 @@ If you find this code useful in a publication, please use the following citation
 ```
 
 ## Setup 
-The original frontend was tested on Ubuntu 22.04 and Windows 11 with PyTorch 2.7.0, and CUDA 11.8 and 12.8. The new R3 path targets Python 3.12, CUDA 12.8, and PyTorch >=2.5; its adapter has CPU regression coverage, but full CUDA reconstruction and Docker build validation are still required.
+The original frontend was tested on Ubuntu 22.04 and Windows 11 with PyTorch 2.7.0, and CUDA 11.8 and 12.8. The R3 Docker runtime has been validated with Python 3.12, PyTorch 2.11.0+cu128, and CUDA 12.8, including 61 regression tests and offline end-to-end reconstruction. Reconstruction quality and tracking recovery still require acceptance testing; private deployment and capture reports are not published in this repository.
 <br>
 Create the environment:
 ```bash
@@ -74,8 +74,9 @@ SET DISTUTILS_USE_SDK=1 # (If you use cmd.exe)
 $env:DISTUTILS_USE_SDK=1 # (If you use PowerShell)
 ```
 ```bash
-# Get the versions corresponding to your compute platform at https://pytorch.org/
-pip install torch torchvision xformers --index-url https://download.pytorch.org/whl/cu128
+# R3 currently requires the NumPy 1.x ABI, including its compiled consumers.
+export PIP_CONSTRAINT="$PWD/constraints-runtime.txt"
+pip install torch==2.11.0+cu128 torchvision==0.26.0+cu128 xformers==0.0.35 --index-url https://download.pytorch.org/whl/cu128
 pip install cupy-cuda12x
 pip install -r requirements.txt
 pip install --no-deps -r requirements-r3-source.txt
@@ -169,6 +170,8 @@ Build the image:
 docker compose build
 ```
 
+The image pins the tested PyTorch stack and applies [runtime constraints](constraints-runtime.txt) to NumPy, CuPy, SciPy, OpenCV, PLY, and CUDA bindings. R3 source uses a commit-pinned, SHA-256-verified archive. Generic packages use the Huawei PyPI mirror by default; override it with `--build-arg PIP_PACKAGE_INDEX=https://pypi.org/simple` when building. GPU wheels still come from the official PyTorch CUDA 12.8 index.
+
 Run a phone video stream reconstruction:
 ```bash
 STREAM_URL="http://<phone-ip>:<port>/video" docker compose up
@@ -215,11 +218,31 @@ docker cp "$container_id":/app/models/cache/. ./models/cache/
 
 Skip any source directories that do not exist. For a custom `MODELS_DIR`, replace `./models` in these commands with that host path. Keep the old volumes until the new container has loaded the models successfully; do not use `docker compose down -v` to migrate them.
 
+### Private Data And Configuration
+
+Only code, generic documentation, and the blank `.env.example` template belong in GitHub. Put real camera URLs and credentials in the ignored `.env` or `.env.*` files, and keep other deployment-specific configuration under `private/` or in `*.local.json` / `*.local.yaml` / `*.local.yml` files. Never fill `.env.example` with real connection details.
+
+Captured images, video, geometry, reconstruction exports, logs, and detailed validation reports must stay under ignored `data/`, `captures/`, `recordings/`, `results/`, `logs/`, or `private/` directories. The Docker build context excludes these locations and local environment files as well. Keep actual IP addresses, server accounts, private filesystem paths, and capture details out of public documentation and commit messages. Do not force-add ignored files; ignore rules do not protect files already tracked by Git.
+
 ## Data Guidelines
 > Please note that our method **is not a drop-in replacement for COLMAP + 3DGS, as it does not reorder images**. We require sequential capture that implies several constraints on the kind of data that can be handled. Please follow the **[Capture Guidelines](#capture-guidelines) for best results on your own data.**
 
 The dataloader will look for images in `${SOURCE_PATH}/images` by default. The images should be ordered alphabetically and have a `.png`, `.jpg` or `.jpeg` extension.
 It will also optionally look for [COLMAP files](https://colmap.github.io/format.html) in `${SOURCE_PATH}/sparse/0` for ground truth poses visualization.
+
+For a repeatable phone-camera test, record a bounded sequence before reconstruction:
+
+```bash
+export STREAM_URL="http://<phone-ip>:<port>/video"
+python -m scripts.capture_stream data/phone-test --seconds 60 --fps 2
+python -m scripts.validate_r3_cuda data/phone-test/images \
+  --limit 200 --downsampling 2 --report results/phone-geometry.json
+python train.py -s data/phone-test -m results/phone-test \
+  --geometry_provider r3 --viewer_mode none --downsampling 2 \
+  --test_hold 8 --test_frequency 20
+```
+
+The output directory must be new. `capture.json` records received frame times, dimensions, and completion, without the stream URL; those times are not camera exposure timestamps. The sampling rate is a ceiling, so a 60-second capture may contain fewer than 120 frames. Use `--downsampling 2` for 1920x1080 input; adapt it to the capture resolution. The geometry validator measures only the frontend, not total 3DGS memory or end-to-end speed.
 
 To download the datasets used in Table 1 of the paper, run:
 ```bash
@@ -254,7 +277,7 @@ Native installation needs **both** `requirements-r3.txt` (also included by `requ
 docker compose up --build
 ```
 
-Default resource settings are a 504-pixel longest input edge, 3 recent frames, 8 bank keyframes plus the first anchor, and 40 active 3DGS keyframes. The bank must contain at least 2 keyframes because the pinned upstream eviction policy does not enforce a single-slot bank. These are bounded frontend settings, **not a measured 16/24 GB memory guarantee**. Gaussian state and image resolution also affect memory. A smaller configuration is:
+Default resource settings are a 504-pixel longest input edge, 3 recent frames, 8 bank keyframes plus the first anchor, and 40 active 3DGS keyframes. The bank must contain at least 2 keyframes because the pinned upstream eviction policy does not enforce a single-slot bank. The 3DGS GPU keyframe budget must be at least 21: the anchor window retains 20 frames and CPU/GPU swaps need another slot. These are bounded frontend settings, **not a measured 16/24 GB memory guarantee**. Gaussian state and image resolution also affect memory. A smaller configuration is:
 
 ```bash
 python train.py -s data/my_capture -m results/my_capture \

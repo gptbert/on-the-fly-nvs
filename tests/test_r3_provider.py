@@ -231,6 +231,15 @@ class ArgsTests(unittest.TestCase):
             with self.subTest(case=case), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 self.parse(*case)
 
+    def test_gpu_keyframe_budget_preserves_anchor_and_swap_window(self):
+        for provider in ('r3', 'default'):
+            for budget in ('0', '8', '20'):
+                with self.subTest(provider=provider, budget=budget):
+                    with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                        self.parse('--geometry_provider', provider, '--max_active_keyframes', budget)
+            self.assertEqual(self.parse('--geometry_provider', provider,
+                                        '--max_active_keyframes', '21').max_active_keyframes, 21)
+
 
 class BackendTests(unittest.TestCase):
     def test_single_step_normalization_shapes_and_bounded_diagnostics(self):
